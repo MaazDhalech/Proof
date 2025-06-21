@@ -39,8 +39,9 @@ export default {
     "experiments": {
       "typedRoutes": true
     },
-    "extras":{
-      anon_public_key: process.env.anon_public_key
+    "extra":{
+      ANON_PUBLIC_KEY: process.env.ANON_PUBLIC_KEY,
+      SUPABASE_URL: process.env.SUPABASE_URL,
     }
   }
 }
