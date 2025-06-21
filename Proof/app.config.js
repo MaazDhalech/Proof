@@ -1,4 +1,5 @@
-{
+
+export default {
   "expo": {
     "name": "Proof",
     "slug": "Proof",
@@ -37,6 +38,9 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extras":{
+      anon_public_key: process.env.anon_public_key
     }
   }
 }
