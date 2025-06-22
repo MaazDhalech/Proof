@@ -1,7 +1,7 @@
 export default {
   expo: {
     name: "Proof",
-    slug: "Proof",
+    slug: "proof",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/images/icon.png",
@@ -10,6 +10,10 @@ export default {
     newArchEnabled: true,
     ios: {
       supportsTablet: true,
+      bundleIdentifier: "com.proof.proof",
+      entitlements: {
+        "aps-environment": "development", // ✅ Enables push notifications on dev builds
+      },
     },
     android: {
       adaptiveIcon: {
@@ -40,6 +44,9 @@ export default {
     },
     extra: {
       ANON_PUBLIC_KEY: process.env.ANON_PUBLIC_KEY,
+      LETTA_API_KEY: process.env.LETTA_API_KEY,
+      LETTA_CHATBOT_MODEL: process.env.LETTA_CHATBOT_MODEL,
+      LETTA_IMAGE_VERIFIER_MODEL: process.env.LETTA_IMAGE_VERIFIER_MODEL,
       PUBLIC_SUPABASE_URL: process.env.PUBLIC_SUPABASE_URL,
       SERVICE_ROLE_KEY: process.env.SERVICE_ROLE_KEY,
       eas: {
