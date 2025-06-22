@@ -4,7 +4,7 @@ import { Camera } from 'expo-camera';
 import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -47,6 +47,7 @@ export default function GoalsPage() {
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   
+  const textInputRef = useRef<TextInput>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -370,16 +371,21 @@ const submitToSupabase = async () => {
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        <View style={styles.centerContent}>
-          <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
-            {challengeName}
-          </Text>
-          <Text style={{ fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 20 }}>
-            {challengeDescription}
-          </Text>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>{challengeName}</Text>
+          <Text style={styles.headerDescription}>{challengeDescription}</Text>
         </View>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+
+        {/* Main Content */}
+        <ScrollView 
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           {isLoading && (
             <View style={styles.centerContent}>
               <ActivityIndicator size="large" color="#007AFF" />
@@ -410,16 +416,6 @@ const submitToSupabase = async () => {
                 <View style={styles.successContainer}>
                   <Text style={styles.successText}>✅ Great photo!</Text>
                   <Text style={styles.reasonText}>{lettaResponse.reason}</Text>
-                  
-                  <TextInput
-                    style={styles.captionInput}
-                    placeholder="Add a caption... (required)"
-                    placeholderTextColor= "grey"
-                    value={caption}
-                    onChangeText={setCaption}
-                    multiline
-                    maxLength={500}
-                  />
                   
                   <View style={styles.buttonContainer}>
                     <TouchableOpacity 
@@ -467,6 +463,39 @@ const submitToSupabase = async () => {
             </View>
           )}
         </ScrollView>
+
+        {/* Instagram-style Caption Input at Bottom - Only show when photo is successful */}
+        {lettaResponse && lettaResponse.score >= 7 && (
+          <View style={styles.captionInputContainer}>
+            <View style={styles.captionInputWrapper}>
+              <TextInput
+                ref={textInputRef}
+                style={styles.captionInput}
+                placeholder="Add a caption..."
+                placeholderTextColor="#999"
+                value={caption}
+                onChangeText={setCaption}
+                multiline
+                maxLength={500}
+                returnKeyType="default"
+                blurOnSubmit={false}
+              />
+              {caption.trim() && (
+                <TouchableOpacity 
+                  style={styles.postButton}
+                  onPress={submitToSupabase}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color="#007AFF" />
+                  ) : (
+                    <Text style={styles.postButtonText}>Post</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -480,9 +509,31 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
+  header: {
+    backgroundColor: 'white',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  headerDescription: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  scrollView: {
+    flex: 1,
+  },
   scrollContent: {
     flexGrow: 1,
     padding: 20,
+    paddingBottom: 100, // Extra padding to account for caption input
   },
   centerContent: {
     flex: 1,
@@ -557,17 +608,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     lineHeight: 22,
   },
-  captionInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    minHeight: 80,
-    width: '100%',
-    textAlignVertical: 'top',
-    marginBottom: 20,
-  },
   buttonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -606,5 +646,40 @@ const styles = StyleSheet.create({
     color: '#dc3545',
     marginBottom: 20,
     textAlign: 'center',
+  },
+  // Instagram-style caption input at bottom
+  captionInputContainer: {
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+  },
+  captionInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#f8f8f8',
+    borderRadius: 20,
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    minHeight: 40,
+  },
+  captionInput: {
+    flex: 1,
+    fontSize: 16,
+    maxHeight: 100,
+    paddingVertical: 8,
+    paddingRight: 10,
+    color: '#333',
+  },
+  postButton: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    marginLeft: 8,
+  },
+  postButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
