@@ -1,9 +1,11 @@
 import { supabase } from '@/services/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
+import { Picker } from '@react-native-picker/picker';
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -22,6 +24,22 @@ export default function SignUpScreen() {
   const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState('');
   const [state, setState] = useState('');
+  const [showStatePicker, setShowStatePicker] = useState(false);
+  const [tempSelectedState, setTempSelectedState] = useState(''); // Track temporary selection
+
+  // Move the states array here, at the component level
+  const states = [
+    'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+    'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
+    'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
+    'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+    'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+    'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+    'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+    'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+    'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+    'West Virginia', 'Wisconsin', 'Wyoming'
+  ];
 
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
@@ -61,6 +79,24 @@ export default function SignUpScreen() {
   const handleDateChange = (text: string) => {
     const formatted = formatDate(text);
     setDob(formatted);
+  };
+
+  // Handle opening the state picker
+  const handleOpenStatePicker = () => {
+    setTempSelectedState(state); // Initialize with current state
+    setShowStatePicker(true);
+  };
+
+  // Handle confirming state selection
+  const handleConfirmStateSelection = () => {
+    setState(tempSelectedState);
+    setShowStatePicker(false);
+  };
+
+  // Handle canceling state selection
+  const handleCancelStateSelection = () => {
+    setTempSelectedState('');
+    setShowStatePicker(false);
   };
 
   const handleSignUp = async () => {
@@ -228,14 +264,50 @@ export default function SignUpScreen() {
             />
 
             <Text style={styles.inputLabel}>State/Region *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="California"
-              placeholderTextColor="#999"
-              value={state}
-              onChangeText={setState}
-              returnKeyType="done"
-            />
+            <TouchableOpacity 
+              style={styles.stateSelector}
+              onPress={handleOpenStatePicker}
+            >
+              <Text style={[styles.stateSelectorText, !state && styles.placeholderText]}>
+                {state || 'Select a state...'}
+              </Text>
+              <Text style={styles.dropdownArrow}>▼</Text>
+            </TouchableOpacity>
+
+            <Modal
+              visible={showStatePicker}
+              transparent={true}
+              animationType="slide"
+            >
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <TouchableOpacity onPress={handleCancelStateSelection}>
+                      <Text style={styles.modalButton}>Cancel</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.modalTitle}>Select State</Text>
+                    <TouchableOpacity onPress={handleConfirmStateSelection}>
+                      <Text style={[styles.modalButton, styles.doneButton]}>Done</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Picker
+                    selectedValue={tempSelectedState}
+                    onValueChange={(itemValue) => setTempSelectedState(itemValue)}
+                    style={styles.modalPicker}
+                    itemStyle={styles.pickerItem}
+                  >
+                    {states.map((stateName) => (
+                      <Picker.Item 
+                        key={stateName} 
+                        label={stateName} 
+                        value={stateName}
+                        color="#1a1a1a"
+                      />
+                    ))}
+                  </Picker>
+                </View>
+              </View>
+            </Modal>
 
             <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
               <Text style={styles.signUpButtonText}>Sign Up</Text>
@@ -302,6 +374,70 @@ const styles = StyleSheet.create({
   },
   nameInput: {
     flex: 1,
+  },
+  stateSelector: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#e1e3e6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  stateSelectorText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+  },
+  placeholderText: {
+    color: '#999',
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: '#666',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '50%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1e3e6',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  modalButton: {
+    fontSize: 16,
+    color: '#0066ff',
+    fontWeight: '500',
+  },
+  doneButton: {
+    fontWeight: '600',
+  },
+  modalPicker: {
+    height: 200,
+  },
+  pickerItem: {
+    fontSize: 18,
+    color: '#1a1a1a',
+    textAlign: 'center',
   },
   signUpButton: {
     backgroundColor: '#0066ff',
