@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
+    "@letta-ai/letta-client": "^0.1.132",
+    "@react-native-community/datetimepicker": "8.3.0",
     "@react-native-picker/picker": "^2.11.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.3.8",
@@ -29,8 +31,8 @@
     "expo-image": "~2.3.0",
     "expo-image-picker": "~16.1.4",
     "expo-linking": "~7.1.5",
-    "expo-modules-core": "^2.4.0",
     "expo-media-library": "~17.1.7",
+    "expo-modules-core": "^2.4.0",
     "expo-notifications": "~0.31.3",
     "expo-router": "~5.1.0",
     "expo-secure-store": "~14.2.3",
@@ -50,8 +52,7 @@
     "react-native-screens": "~4.11.1",
     "react-native-vector-icons": "^10.2.0",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5",
-    "@react-native-community/datetimepicker": "8.3.0"
+    "react-native-webview": "13.13.5"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

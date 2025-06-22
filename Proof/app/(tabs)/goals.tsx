@@ -14,7 +14,7 @@ import {
 type Goal = {
   id: number;
   title: string;
-  category: string;
+  description: string;
 };
 
 export default function GoalsPage() {
@@ -41,7 +41,7 @@ export default function GoalsPage() {
         const formatted = data?.map((item) => ({
           id: item.id,
           title: item.name,
-          category: item.description,
+          description: item.description,
         }));
         setGoals(formatted || []);
       }
@@ -55,10 +55,17 @@ export default function GoalsPage() {
   const renderGoal = ({ item }: { item: Goal }) => (
     <View style={styles.goalCard}>
       <Text style={styles.goalTitle}>{item.title}</Text>
-      <Text style={styles.category}>{item.category}</Text>
+      <Text style={styles.description}>{item.description}</Text>
       <TouchableOpacity
         style={styles.checkInButton}
-        onPress={() => router.push(`/goals/${item.id}/check-in`)}
+        onPress={() => router.push({
+          pathname: `/goals/${item.id}/check-in`,
+          params: {
+            challengeName: item.title,
+            challengeDescription: item.description,
+            id: item.id
+          }
+        })}
       >
         <Text style={styles.checkInText}>Check In</Text>
       </TouchableOpacity>
@@ -118,7 +125,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#222',
   },
-  category: {
+  description: {
     fontSize: 14,
     color: '#666',
     marginTop: 4,
