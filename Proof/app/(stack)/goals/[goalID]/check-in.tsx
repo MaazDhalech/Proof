@@ -1,24 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-  Image,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-} from 'react-native';
+import { letta_client } from '@/services/letta';
+import { supabase } from '@/services/supabase'; // Adjust path as needed
 import { Camera } from 'expo-camera';
+import Constants from 'expo-constants';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { supabase } from '@/services/supabase'; // Adjust path as needed
-import Constants from 'expo-constants';
-import { letta_client } from '@/services/letta';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 const {
   LETTA_IMAGE_VERIFIER_MODEL,
@@ -63,34 +63,40 @@ export default function GoalsPage() {
     }
   };
 
-  const takePhoto = async () => {
-    try {
-      setIsLoading(true);
-      
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.3,
-        base64: true,
-      });
+const takePhoto = async () => {
+  try {
+    setIsLoading(true);
 
-      if (!result.canceled && result.assets[0]) {
-        const asset = result.assets[0];
-        setImageUri(asset.uri);
-        setImageBase64(asset.base64 || null);
-        
-        if (asset.base64) {
-          await analyzeLetta(asset.base64);
-        }
-      }
-    } catch (error) {
-      console.error('Error taking photo:', error);
-      Alert.alert('Error', 'Failed to take photo. Please try again.');
-    } finally {
-      setIsLoading(false);
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.3,
+      base64: true,
+    });
+
+    if (result.canceled) {
+      router.push('/goals');
+      return;
     }
-  };
+
+    if (result.assets[0]) {
+      const asset = result.assets[0];
+      setImageUri(asset.uri);
+      setImageBase64(asset.base64 || null);
+
+      if (asset.base64) {
+        await analyzeLetta(asset.base64);
+      }
+    }
+  } catch (error) {
+    console.error('Error taking photo:', error);
+    Alert.alert('Error', 'Failed to take photo. Please try again.');
+  } finally {
+    setIsLoading(false);
+  }
+};
+
 
   const analyzeLetta = async (base64Image: string) => {
     try {
@@ -124,21 +130,32 @@ export default function GoalsPage() {
       let responseText = '';
       
       if (response && 'messages' in response && Array.isArray(response.messages)) {
-        // First try to find assistant_message
-        let assistantMessage = response.messages.find(
-          (msg: any) => msg.messageType === 'assistant_message' && msg.content
+        // First try to find generate_final_response tool return message
+        let finalResponseMessage = response.messages.find(
+          (msg: any) => msg.messageType === 'tool_return_message' && 
+          msg.name === 'generate_final_response' && 
+          msg.toolReturn
         );
         
-        if (assistantMessage && assistantMessage.content) {
-          responseText = assistantMessage.content;
+        if (finalResponseMessage && finalResponseMessage.toolReturn) {
+          responseText = finalResponseMessage.toolReturn;
         } else {
-          // If no assistant_message, look for tool_return_message
-          const toolReturnMessage = response.messages.find(
-            (msg: any) => msg.messageType === 'tool_return_message' && msg.toolReturn
+          // Fallback: try to find assistant_message
+          let assistantMessage = response.messages.find(
+            (msg: any) => msg.messageType === 'assistant_message' && msg.content
           );
           
-          if (toolReturnMessage && toolReturnMessage.toolReturn) {
-            responseText = toolReturnMessage.toolReturn;
+          if (assistantMessage && assistantMessage.content) {
+            responseText = assistantMessage.content;
+          } else {
+            // Last fallback: look for any tool_return_message
+            const toolReturnMessage = response.messages.find(
+              (msg: any) => msg.messageType === 'tool_return_message' && msg.toolReturn
+            );
+            
+            if (toolReturnMessage && toolReturnMessage.toolReturn) {
+              responseText = toolReturnMessage.toolReturn;
+            }
           }
         }
       }
@@ -150,13 +167,19 @@ export default function GoalsPage() {
       // Parse JSON from the response
       let data: LettaResponse;
       try {
-        // Try to extract JSON from the response text
-        const jsonMatch = responseText.match(/\{[^}]*"score"[^}]*\}/);
-        if (jsonMatch) {
-          data = JSON.parse(jsonMatch[0]);
+        // First try to parse the response as direct JSON
+        if (responseText.trim().startsWith('{')) {
+          data = JSON.parse(responseText);
         } else {
-          throw new Error('No valid JSON found in response');
+          // If not direct JSON, try to extract JSON from the response text
+          const jsonMatch = responseText.match(/\{[^}]*"score"[^}]*\}/);
+          if (jsonMatch) {
+            data = JSON.parse(jsonMatch[0]);
+          } else {
+            throw new Error('No valid JSON found in response');
+          }
         }
+
       } catch (parseError) {
         console.error('Error parsing JSON response:', parseError);
         // Fallback response if parsing fails
@@ -305,7 +328,7 @@ export default function GoalsPage() {
                   
                   <TextInput
                     style={styles.captionInput}
-                    placeholder="Add a caption..."
+                    placeholder="Add a caption... (required)"
                     placeholderTextColor= "grey"
                     value={caption}
                     onChangeText={setCaption}
