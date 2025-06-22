@@ -1,227 +1,92 @@
 import { supabase } from '@/services/supabase';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
+  ActivityIndicator,
+  FlatList,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
-export default function SignUpScreen() {
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [dob, setDob] = useState('');
-  const [state, setState] = useState('');
+type Goal = {
+  id: number;
+  title: string;
+  category: string;
+};
 
-  const formatDate = (text: string) => {
-    // Remove all non-numeric characters
-    const cleaned = text.replace(/\D/g, '');
-    
-    // Format as YYYY-MM-DD
-    if (cleaned.length >= 8) {
-      return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6, 8)}`;
-    } else if (cleaned.length >= 6) {
-      return `${cleaned.slice(0, 4)}-${cleaned.slice(4, 6)}-${cleaned.slice(6)}`;
-    } else if (cleaned.length >= 4) {
-      return `${cleaned.slice(0, 4)}-${cleaned.slice(4)}`;
-    }
-    return cleaned;
-  };
+export default function GoalsPage() {
+  const router = useRouter();
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleDateChange = (text: string) => {
-    const formatted = formatDate(text);
-    setDob(formatted);
-  };
+  useEffect(() => {
+    const fetchGoals = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession(); 
+      const uid = session?.user.id;
+      if (!uid) return;
 
-  const handleSignUp = async () => {
-    if (!username || !email || !password || !firstName || !lastName || !dob || !state) {
-      Alert.alert('Validation Error', 'Please fill all required fields');
-      return;
-    }
+      const { data, error } = await supabase
+        .from('challenges')
+        .select('id, name, description')
+        .eq('user_id', uid);
 
-    try {
-      // 1. Create auth user
-      const { data: authData, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: { 
-            username,
-            first_name: firstName,
-            last_name: lastName
-          },
-        },
-      });
-
-      if (signUpError) throw signUpError;
-
-      // 2. If signup successful, create profile record
-      if (authData.user) {
-        // Create full_name from first and last name
-        const fullName = [firstName.trim(), lastName.trim()].filter(name => name.length > 0).join(' ') || null;
-        
-        const { error: profileError } = await supabase
-          .from('profile')
-          .insert({
-            id: authData.user.id, // Use auth user's UUID as profile ID
-            username,
-            first_name: firstName,
-            last_name: lastName,
-            email,
-            full_name: fullName,
-            dob: dob,
-            state: state,
-            profile_picture: null,
-            current_streak: 0,
-            goals_completed: 0,
-            longest_streak: 0,
-            goal_completion_rate: 0.0,
-            last_checkin: null,
-            is_private: false
-            // created_at and updated_at will be set automatically by database defaults
-          });
-
-        if (profileError) {
-          // Handle unique constraint violations specifically
-          if (profileError.code === '23505' && profileError.message.includes('username')) {
-            throw new Error('Username already exists. Please choose a different username.');
-          }
-          throw profileError;
-        }
+      if (error) {
+        console.error('Error fetching goals:', error);
+      } else {
+        const formatted = data?.map((item) => ({
+          id: item.id,
+          title: item.name,
+          category: item.description,
+        }));
+        setGoals(formatted || []);
       }
 
-      // Show success message and redirect
-      Alert.alert(
-        'Account Created!',
-        `Welcome ${firstName}! Please check your email to verify your account before signing in.`,
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/signin') }]
-      );
+      setLoading(false);
+    };
 
-    } catch (error) {
-      console.error('Sign up error:', error);
-      Alert.alert(
-        'Sign Up Failed',
-        error instanceof Error ? error.message : 'An unknown error occurred'
-      );
-    }
-  };
+    fetchGoals();
+  }, []);
+
+  const renderGoal = ({ item }: { item: Goal }) => (
+    <View style={styles.goalCard}>
+      <Text style={styles.goalTitle}>{item.title}</Text>
+      <Text style={styles.category}>{item.category}</Text>
+      <TouchableOpacity
+        style={styles.checkInButton}
+        onPress={() => router.push(`/goals/${item.id}/check-in`)}
+      >
+        <Text style={styles.checkInText}>Check In</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? -50 : 0}
+      <Text style={styles.header}>Your Goals</Text>
+
+      {loading ? (
+        <ActivityIndicator size="large" color="#007aff" />
+      ) : (
+        <FlatList
+          data={goals}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderGoal}
+          contentContainerStyle={styles.goalList}
+          ListEmptyComponent={<Text>No goals yet. Create one below!</Text>}
+        />
+      )}
+
+      <TouchableOpacity
+        style={styles.createButton}
+        onPress={() => router.push('/goals/create')}
       >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContainer}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-        >
-          <View style={styles.header}>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Join our community today</Text>
-          </View>
-
-          <View style={styles.form}>
-            <Text style={styles.inputLabel}>Username *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your username"
-              placeholderTextColor="#999"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              returnKeyType="next"
-            />
-
-            <Text style={styles.inputLabel}>Email *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your email"
-              placeholderTextColor="#999"
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              returnKeyType="next"
-            />
-
-            <Text style={styles.inputLabel}>Password *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Create a password"
-              placeholderTextColor="#999"
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              returnKeyType="next"
-            />
-
-            <View style={styles.nameContainer}>
-              <View style={[styles.nameInput, { marginRight: 10 }]}>
-                <Text style={styles.inputLabel}>First Name *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="John"
-                  placeholderTextColor="#999"
-                  value={firstName}
-                  onChangeText={setFirstName}
-                  returnKeyType="next"
-                />
-              </View>
-              <View style={styles.nameInput}>
-                <Text style={styles.inputLabel}>Last Name *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Doe"
-                  placeholderTextColor="#999"
-                  value={lastName}
-                  onChangeText={setLastName}
-                  returnKeyType="next"
-                />
-              </View>
-            </View>
-
-            <Text style={styles.inputLabel}>Date of Birth *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor="#999"
-              value={dob}
-              onChangeText={handleDateChange}
-              keyboardType="numeric"
-              maxLength={10}
-              returnKeyType="next"
-            />
-
-            <Text style={styles.inputLabel}>State/Region *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="California"
-              placeholderTextColor="#999"
-              value={state}
-              onChangeText={setState}
-              returnKeyType="done"
-            />
-
-            <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
-              <Text style={styles.signUpButtonText}>Sign Up</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <Text style={styles.createButtonText}>+ Create New Goal</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -229,66 +94,59 @@ export default function SignUpScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  scrollContainer: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
   },
   header: {
-    marginTop: 20,
-    marginBottom: 32,
-    alignItems: 'center',
-  },
-  title: {
     fontSize: 28,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 8,
+    fontWeight: 'bold',
+    color: '#111',
+    marginTop: 20,
+    marginBottom: 12,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
+  goalList: {
+    paddingBottom: 80,
   },
-  form: {
-    width: '100%',
-    paddingBottom: 20,
+  goalCard: {
+    backgroundColor: '#f2f2f2',
+    padding: 16,
+    borderRadius: 10,
+    marginVertical: 8,
   },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#444',
-    marginBottom: 8,
-    marginTop: 16,
-  },
-  input: {
-    backgroundColor: '#fff',
-    color: '#1a1a1a',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#e1e3e6',
-  },
-  nameContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  nameInput: {
-    flex: 1,
-  },
-  signUpButton: {
-    backgroundColor: '#0066ff',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 32,
-  },
-  signUpButtonText: {
-    color: 'white',
-    fontSize: 16,
+  goalTitle: {
+    fontSize: 18,
     fontWeight: '600',
+    color: '#222',
+  },
+  category: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  checkInButton: {
+    marginTop: 10,
+    backgroundColor: '#007aff',
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  checkInText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  createButton: {
+    backgroundColor: '#007aff',
+    padding: 16,
+    borderRadius: 10,
+    position: 'absolute',
+    bottom: 30,
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+  },
+  createButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
