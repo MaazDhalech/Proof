@@ -9,7 +9,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 type Goal = {
@@ -25,11 +25,20 @@ type Goal = {
   created_at: string;
 };
 
+type Friend = {
+  id: string;
+  name: string;
+  username: string;
+  friendshipId: string;
+  challenges: Goal[];
+};
+
 export default function GoalsPage() {
   const router = useRouter();
   const { expoPushToken, notification } = usePushNotifications();
 
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"your" | "friends">("your");
   const [userId, setUserId] = useState<string | undefined>();
@@ -43,7 +52,11 @@ export default function GoalsPage() {
     };
     getCurrentUser();
 
-    if (tab === "your") fetchGoals();
+    if (tab === "your") {
+      fetchGoals();
+    } else if (tab === "friends") {
+      fetchFriendsWithGoals();
+    }
   }, [tab]);
 
   const fetchGoals = async () => {
@@ -76,6 +89,98 @@ export default function GoalsPage() {
       setGoals(data || []);
     } catch (err) {
       console.error("Error in fetchGoals:", err);
+    }
+
+    setLoading(false);
+  };
+
+  const fetchFriendsWithGoals = async () => {
+    setLoading(true);
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const uid = session?.user.id;
+
+    if (!uid) {
+      console.log("No user session found");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // First, fetch friends
+      const { data: friendsData, error: friendsError } = await supabase
+        .from('friendships')
+        .select(`
+          id,
+          user_id,
+          friend_id,
+          sender:profile!friendships_user_id_fkey (
+            id,
+            username,
+            first_name,
+            last_name
+          ),
+          receiver:profile!friendships_friend_id_fkey (
+            id,
+            username,
+            first_name,
+            last_name
+          )
+        `)
+        .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
+        .eq('status', 'accepted');
+
+      if (friendsError) {
+        console.error('Error fetching friends:', friendsError);
+        setLoading(false);
+        return;
+      }
+
+      // Get friend IDs
+      const friendIds = friendsData.map((item: any) => {
+        const isUserSender = item.user_id === uid;
+        const profile = isUserSender ? item.receiver : item.sender;
+        return profile.id;
+      });
+
+      // Fetch challenges for all friends
+      let challengesData: any[] = [];
+      if (friendIds.length > 0) {
+        const { data, error: challengesError } = await supabase
+          .from('challenges')
+          .select('*')
+          .in('user_id', friendIds);
+
+        if (challengesError) {
+          console.error('Error fetching challenges:', challengesError);
+        } else {
+          challengesData = data || [];
+        }
+      }
+
+      // Combine friends with their challenges
+      const formatted: Friend[] = friendsData.map((item: any) => {
+        const isUserSender = item.user_id === uid;
+        const profile = isUserSender ? item.receiver : item.sender;
+        
+        const friendChallenges = challengesData.filter(
+          (challenge) => challenge.user_id === profile.id
+        );
+
+        return {
+          id: profile.id,
+          name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+          username: profile?.username ?? '',
+          friendshipId: item.id,
+          challenges: friendChallenges,
+        };
+      });
+
+      setFriends(formatted);
+    } catch (err) {
+      console.error("Error in fetchFriendsWithGoals:", err);
     }
 
     setLoading(false);
@@ -177,6 +282,22 @@ export default function GoalsPage() {
     });
   };
 
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) {
+      return parts[0].charAt(0).toUpperCase();
+    }
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  };
+
+  const getStreakEmoji = (streak: number) => {
+    if (streak >= 30) return '🔥';
+    if (streak >= 14) return '⚡';
+    if (streak >= 7) return '💪';
+    if (streak >= 3) return '🌟';
+    return '✨';
+  };
+
   const renderGoal = ({ item }: { item: Goal }) => {
     const progress = calculateProgress(item);
     const checkInStatus = getCheckInStatus(item);
@@ -254,8 +375,9 @@ export default function GoalsPage() {
           onPress={() => {
             if (checkInStatus.canCheckIn && !progress.isComplete) {
               router.push({
-                pathname: `/goals/${item.id}/check-in`,
+                pathname: "/goals/[goalID]/check-in",
                 params: {
+                  goalID: item.id,
                   challengeName: item.name,
                   challengeDescription: item.description,
                   id: item.id,
@@ -282,6 +404,90 @@ export default function GoalsPage() {
     );
   };
 
+  const renderFriendGoal = (goal: Goal, friendName: string) => {
+    const progress = calculateProgress(goal);
+
+    return (
+      <View key={goal.id} style={styles.friendGoalCard}>
+        <View style={styles.friendGoalHeader}>
+          <Text style={styles.friendGoalTitle}>{goal.name}</Text>
+          <View style={styles.streakBadge}>
+            <Text style={styles.streakEmoji}>{getStreakEmoji(goal.current_streak)}</Text>
+            <Text style={styles.streakBadgeText}>{goal.current_streak}</Text>
+          </View>
+        </View>
+        
+        <Text style={styles.friendGoalOwner}>by {friendName}</Text>
+        
+        {goal.description && (
+          <Text style={styles.friendGoalDescription}>{goal.description}</Text>
+        )}
+
+        <View style={styles.friendGoalStats}>
+          <Text style={styles.friendStatText}>
+            Check-ins: {goal.total_checkins}
+          </Text>
+          <Text style={styles.friendStatText}>
+            Frequency: {goal.frequency}x/week
+          </Text>
+        </View>
+
+        <View style={styles.progressSection}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>Progress</Text>
+            <Text style={styles.progressStats}>
+              {progress.daysCompleted}/{progress.totalDays} days (
+              {Math.round(progress.progressPercentage)}%)
+            </Text>
+          </View>
+
+          <View style={styles.progressBarContainer}>
+            <View
+              style={[
+                styles.progressBar,
+                {
+                  width: `${progress.progressPercentage}%`,
+                  backgroundColor: progress.isComplete ? "#4CAF50" : "#007aff",
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        {goal.end_date && (
+          <Text style={styles.friendGoalDate}>
+            Ends: {formatDate(goal.end_date)}
+          </Text>
+        )}
+      </View>
+    );
+  };
+
+  const renderFriend = ({ item }: { item: Friend }) => (
+    <View style={styles.friendCard}>
+      <View style={styles.friendInfo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+        </View>
+        <View style={styles.friendDetails}>
+          <Text style={styles.friendName}>{item.name}</Text>
+          <Text style={styles.friendUsername}>@{item.username}</Text>
+        </View>
+        <Text style={styles.goalCount}>
+          {item.challenges.length} goal{item.challenges.length !== 1 ? 's' : ''}
+        </Text>
+      </View>
+      
+      {item.challenges.length > 0 ? (
+        <View style={styles.friendGoalsContainer}>
+          {item.challenges.map((goal) => renderFriendGoal(goal, item.name))}
+        </View>
+      ) : (
+        <Text style={styles.noGoalsText}>No active goals</Text>
+      )}
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.tabContainer}>
@@ -302,7 +508,7 @@ export default function GoalsPage() {
           <Text
             style={[styles.tabText, tab === "friends" && styles.activeTabText]}
           >
-            Friends' Goals
+            Friends Goals
           </Text>
         </TouchableOpacity>
       </View>
@@ -310,7 +516,9 @@ export default function GoalsPage() {
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007aff" />
-          <Text style={styles.loadingText}>Loading your goals...</Text>
+          <Text style={styles.loadingText}>
+            {tab === "your" ? "Loading your goals..." : "Loading friends goals..."}
+          </Text>
         </View>
       ) : tab === "your" ? (
         <FlatList
@@ -329,20 +537,32 @@ export default function GoalsPage() {
           }
         />
       ) : (
-        <View style={styles.placeholder}>
-          <Text style={styles.placeholderText}>
-            Friends' goals view coming soon.
-          </Text>
-        </View>
+        <FlatList
+          data={friends}
+          keyExtractor={(item) => item.friendshipId}
+          renderItem={renderFriend}
+          contentContainerStyle={styles.goalList}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>No friends yet!</Text>
+              <Text style={styles.emptySubtitle}>
+                Add friends to see their goals here
+              </Text>
+            </View>
+          }
+        />
       )}
 
       {tab === "your" && (
-        <TouchableOpacity
-          style={styles.createButton}
-          onPress={() => router.push("/goals/create")}
-        >
-          <Text style={styles.createButtonText}>+ Create New Goal</Text>
-        </TouchableOpacity>
+        <View style={styles.createButtonContainer}>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => router.push("/goals/create")}
+          >
+            <Text style={styles.createButtonText}>+ Create New Goal</Text>
+          </TouchableOpacity>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -365,7 +585,7 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   goalList: {
-    paddingBottom: 100,
+    paddingBottom: 120, // Increased padding to account for button container
     paddingTop: 12,
   },
   goalCard: {
@@ -511,14 +731,31 @@ const styles = StyleSheet.create({
   warningButton: {
     backgroundColor: "#ff9500",
   },
+  createButtonContainer: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#f8f9fa", // Same as container background
+    paddingTop: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderTopColor: "#e9ecef",
+    // Add gradient-like shadow effect
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   createButton: {
     backgroundColor: "#007aff",
     padding: 18,
     borderRadius: 12,
-    position: "absolute",
-    bottom: 30,
-    left: 20,
-    right: 20,
     alignItems: "center",
     shadowColor: "#007aff",
     shadowOffset: {
@@ -563,15 +800,6 @@ const styles = StyleSheet.create({
     color: "#007aff",
     fontWeight: "700",
   },
-  placeholder: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  placeholderText: {
-    fontSize: 16,
-    color: "#888",
-  },
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
@@ -588,5 +816,133 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#666",
     textAlign: "center",
+  },
+  // Friends' goals styles
+  friendCard: {
+    backgroundColor: "#ffffff",
+    padding: 16,
+    borderRadius: 16,
+    marginVertical: 8,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#f0f0f0",
+  },
+  friendInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#3b82f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  avatarText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+  },
+  friendDetails: {
+    flex: 1,
+  },
+  friendName: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#111",
+  },
+  friendUsername: {
+    fontSize: 14,
+    color: "#666",
+    marginTop: 2,
+  },
+  goalCount: {
+    fontSize: 14,
+    color: "#007aff",
+    fontWeight: "600",
+  },
+  friendGoalsContainer: {
+    gap: 12,
+  },
+  friendGoalCard: {
+    backgroundColor: "#f8f9fa",
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e9ecef",
+  },
+  friendGoalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  friendGoalTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111",
+    flex: 1,
+    marginRight: 8,
+  },
+  friendGoalOwner: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 8,
+    fontStyle: "italic",
+  },
+  friendGoalDescription: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  friendGoalStats: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  friendStatText: {
+    fontSize: 12,
+    color: "#888",
+  },
+  friendGoalDate: {
+    fontSize: 12,
+    color: "#999",
+    fontStyle: "italic",
+    marginTop: 8,
+  },
+  streakBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ff6b35",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  streakEmoji: {
+    fontSize: 12,
+    marginRight: 2,
+  },
+  streakBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  noGoalsText: {
+    fontSize: 14,
+    color: "#999",
+    fontStyle: "italic",
+    textAlign: "center",
+    paddingVertical: 12,
   },
 });

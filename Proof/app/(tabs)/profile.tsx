@@ -27,6 +27,7 @@ type UserProfile = {
   longest_streak?: number;
   goals_completed?: number;
   total_goals?: number;
+  goal_completion_rate?: number; // Added this field
 };
 
 type UserStats = {
@@ -35,6 +36,62 @@ type UserStats = {
   completionRate: number;
   totalGoals: number;
 };
+
+// US States list
+const US_STATES = [
+  { value: '', label: 'Select State' },
+  { value: 'AL', label: 'Alabama' },
+  { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' },
+  { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' },
+  { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' },
+  { value: 'DE', label: 'Delaware' },
+  { value: 'FL', label: 'Florida' },
+  { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' },
+  { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' },
+  { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' },
+  { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' },
+  { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' },
+  { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' },
+  { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' },
+  { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' },
+  { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' },
+  { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' },
+  { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' },
+  { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' },
+  { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' },
+  { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' },
+  { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' },
+  { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' },
+  { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' },
+  { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' },
+  { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' },
+  { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' },
+  { value: 'WY', label: 'Wyoming' },
+  { value: 'DC', label: 'District of Columbia' },
+];
 
 export default function ProfileScreen() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -46,6 +103,7 @@ export default function ProfileScreen() {
     totalGoals: 0
   });
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [stateDropdownVisible, setStateDropdownVisible] = useState(false);
   const [tempData, setTempData] = useState({
     first_name: '',
     last_name: '',
@@ -104,6 +162,37 @@ export default function ProfileScreen() {
     setTempData({...tempData, last_name: capitalized});
   };
 
+  // Get state display name
+  const getStateDisplayName = (stateCode: string) => {
+    const state = US_STATES.find(s => s.value === stateCode);
+    return state ? state.label : stateCode || 'Not set';
+  };
+
+  // Handle state selection
+  const handleStateSelect = (stateValue: string) => {
+    setTempData({...tempData, state: stateValue});
+    setStateDropdownVisible(false);
+  };
+
+  // Function to update goal completion rate in the database
+  const updateGoalCompletionRate = async (userId: string, completionRate: number) => {
+    try {
+      const { error } = await supabase
+        .from('profile')
+        .update({
+          goal_completion_rate: completionRate,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', userId);
+
+      if (error) {
+        console.error('Error updating goal completion rate:', error);
+      }
+    } catch (error) {
+      console.error('Error updating goal completion rate:', error);
+    }
+  };
+
   useEffect(() => {
     const fetchUserData = async () => {
       try {
@@ -142,6 +231,13 @@ export default function ProfileScreen() {
         
         const completionRate = totalGoals > 0 ? 
           Math.round((goalsCompleted / totalGoals) * 100) : 0;
+
+        // Update the goal completion rate in the database if it has changed
+        if (profileData.goal_completion_rate !== completionRate) {
+          await updateGoalCompletionRate(authUser.id, completionRate);
+          // Update the local userData to reflect the new completion rate
+          userData.goal_completion_rate = completionRate;
+        }
 
         setUser(userData);
         setTempData({
@@ -187,6 +283,7 @@ export default function ProfileScreen() {
         state: user.state || ''
       });
     }
+    setStateDropdownVisible(false);
     setEditModalVisible(false);
   };
 
@@ -253,7 +350,7 @@ export default function ProfileScreen() {
   if (loading || !user) {
     return (
       <View style={[styles.container, { justifyContent: 'center' }]}>
-        <ActivityIndicator size="large" color="#6366f1" />
+        <ActivityIndicator size="large" color="#3b82f6" />
       </View>
     );
   }
@@ -312,7 +409,7 @@ export default function ProfileScreen() {
         
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Location</Text>
-          <Text style={styles.detailValue}>{user.state || 'Not set'}</Text>
+          <Text style={styles.detailValue}>{getStateDisplayName(user.state || '')}</Text>
         </View>
       </View>
 
@@ -408,13 +505,41 @@ export default function ProfileScreen() {
 
               <View style={styles.modalInputGroup}>
                 <Text style={styles.modalLabel}>Location</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={tempData.state}
-                  onChangeText={(text) => setTempData({...tempData, state: text})}
-                  placeholder="State/Region"
-                  returnKeyType="done"
-                />
+                <TouchableOpacity
+                  style={styles.dropdownButton}
+                  onPress={() => setStateDropdownVisible(!stateDropdownVisible)}
+                >
+                  <Text style={styles.dropdownButtonText}>
+                    {getStateDisplayName(tempData.state)}
+                  </Text>
+                  <Text style={styles.dropdownArrow}>
+                    {stateDropdownVisible ? '▲' : '▼'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {stateDropdownVisible && (
+                  <View style={styles.dropdownContainer}>
+                    <ScrollView style={styles.dropdownScroll} nestedScrollEnabled={true}>
+                      {US_STATES.map((state) => (
+                        <TouchableOpacity
+                          key={state.value}
+                          style={[
+                            styles.dropdownOption,
+                            tempData.state === state.value && styles.dropdownOptionSelected
+                          ]}
+                          onPress={() => handleStateSelect(state.value)}
+                        >
+                          <Text style={[
+                            styles.dropdownOptionText,
+                            tempData.state === state.value && styles.dropdownOptionTextSelected
+                          ]}>
+                            {state.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
               </View>
 
               <View style={styles.modalButtons}>
@@ -449,7 +574,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: '#6366f1',
+    backgroundColor: '#3b82f6',
     justifyContent: 'center',
     alignItems: 'center',
     marginTop: 20,
@@ -500,7 +625,7 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#6366f1',
+    color: '#3b82f6',
     marginBottom: 4,
   },
   statLabel: {
@@ -542,7 +667,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   editButton: {
-    backgroundColor: '#6366f1',
+    backgroundColor: '#3b82f6',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -619,7 +744,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   modalSaveButton: {
-    backgroundColor: '#6366f1',
+    backgroundColor: '#3b82f6',
     padding: 12,
     borderRadius: 8,
     flex: 1,
@@ -638,4 +763,57 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
   },
-});
+  // Dropdown styles
+  dropdownButton: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+    color: '#1e293b',
+    flex: 1,
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    color: '#64748b',
+    marginLeft: 8,
+  },
+  dropdownContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginTop: 4,
+    maxHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  dropdownScroll: {
+    maxHeight: 200,
+  },
+  dropdownOption: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  dropdownOptionSelected: {
+    backgroundColor: '#eff6ff',
+  },
+  dropdownOptionText: {
+    fontSize: 16,
+    color: '#1e293b',
+  },
+  dropdownOptionTextSelected: {
+    color: '#3b82f6',
+    fontWeight: '600',
+  },
+}); 

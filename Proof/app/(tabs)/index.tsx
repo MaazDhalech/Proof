@@ -2,14 +2,14 @@ import { supabase } from '@/services/supabase';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
-  Alert
+  View
 } from 'react-native';
 
 interface Post {
@@ -109,6 +109,8 @@ export default function HomeFeedScreen() {
 
       const postsWithLikeStatus = postData?.map(post => ({
         ...post,
+        profile: Array.isArray(post.profile) ? post.profile[0] : post.profile,
+        challenges: Array.isArray(post.challenges) ? post.challenges[0] : post.challenges,
         userHasLiked: likedPostIds.has(post.id)
       })) || [];
 

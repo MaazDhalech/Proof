@@ -1,11 +1,9 @@
 import { supabase } from '@/services/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Picker } from '@react-native-picker/picker';
 import {
   Alert,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -16,6 +14,62 @@ import {
   View
 } from 'react-native';
 
+// US States list with abbreviations like in ProfileScreen
+const US_STATES = [
+  { value: '', label: 'Select State' },
+  { value: 'AL', label: 'Alabama' },
+  { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' },
+  { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' },
+  { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' },
+  { value: 'DE', label: 'Delaware' },
+  { value: 'FL', label: 'Florida' },
+  { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' },
+  { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' },
+  { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' },
+  { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' },
+  { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' },
+  { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' },
+  { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' },
+  { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' },
+  { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' },
+  { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' },
+  { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' },
+  { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' },
+  { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' },
+  { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' },
+  { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' },
+  { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' },
+  { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' },
+  { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' },
+  { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' },
+  { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' },
+  { value: 'WY', label: 'Wyoming' },
+  { value: 'DC', label: 'District of Columbia' },
+];
+
 export default function SignUpScreen() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -24,22 +78,7 @@ export default function SignUpScreen() {
   const [lastName, setLastName] = useState('');
   const [dob, setDob] = useState('');
   const [state, setState] = useState('');
-  const [showStatePicker, setShowStatePicker] = useState(false);
-  const [tempSelectedState, setTempSelectedState] = useState(''); // Track temporary selection
-
-  // Move the states array here, at the component level
-  const states = [
-    'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
-    'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
-    'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
-    'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
-    'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
-    'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
-    'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
-    'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
-    'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
-    'West Virginia', 'Wisconsin', 'Wyoming'
-  ];
+  const [stateDropdownVisible, setStateDropdownVisible] = useState(false);
 
   // Helper function to capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
@@ -81,22 +120,16 @@ export default function SignUpScreen() {
     setDob(formatted);
   };
 
-  // Handle opening the state picker
-  const handleOpenStatePicker = () => {
-    setTempSelectedState(state); // Initialize with current state
-    setShowStatePicker(true);
+  // Get state display name
+  const getStateDisplayName = (stateCode: string) => {
+    const stateObj = US_STATES.find(s => s.value === stateCode);
+    return stateObj ? stateObj.label : 'Select a state...';
   };
 
-  // Handle confirming state selection
-  const handleConfirmStateSelection = () => {
-    setState(tempSelectedState);
-    setShowStatePicker(false);
-  };
-
-  // Handle canceling state selection
-  const handleCancelStateSelection = () => {
-    setTempSelectedState('');
-    setShowStatePicker(false);
+  // Handle state selection
+  const handleStateSelect = (stateValue: string) => {
+    setState(stateValue);
+    setStateDropdownVisible(false);
   };
 
   const handleSignUp = async () => {
@@ -264,50 +297,43 @@ export default function SignUpScreen() {
             />
 
             <Text style={styles.inputLabel}>State *</Text>
-            <TouchableOpacity 
-              style={styles.stateSelector}
-              onPress={handleOpenStatePicker}
-            >
-              <Text style={[styles.stateSelectorText, !state && styles.placeholderText]}>
-                {state || 'Select a state...'}
-              </Text>
-              <Text style={styles.dropdownArrow}>▼</Text>
-            </TouchableOpacity>
-
-            <Modal
-              visible={showStatePicker}
-              transparent={true}
-              animationType="slide"
-            >
-              <View style={styles.modalOverlay}>
-                <View style={styles.modalContent}>
-                  <View style={styles.modalHeader}>
-                    <TouchableOpacity onPress={handleCancelStateSelection}>
-                      <Text style={styles.modalButton}>Cancel</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.modalTitle}>Select State</Text>
-                    <TouchableOpacity onPress={handleConfirmStateSelection}>
-                      <Text style={[styles.modalButton, styles.doneButton]}>Done</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <Picker
-                    selectedValue={tempSelectedState}
-                    onValueChange={(itemValue) => setTempSelectedState(itemValue)}
-                    style={styles.modalPicker}
-                    itemStyle={styles.pickerItem}
-                  >
-                    {states.map((stateName) => (
-                      <Picker.Item 
-                        key={stateName} 
-                        label={stateName} 
-                        value={stateName}
-                        color="#1a1a1a"
-                      />
+            <View style={styles.dropdownContainer}>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => setStateDropdownVisible(!stateDropdownVisible)}
+              >
+                <Text style={[styles.dropdownButtonText, !state && styles.placeholderText]}>
+                  {getStateDisplayName(state)}
+                </Text>
+                <Text style={styles.dropdownArrow}>
+                  {stateDropdownVisible ? '▲' : '▼'}
+                </Text>
+              </TouchableOpacity>
+              
+              {stateDropdownVisible && (
+                <View style={styles.dropdownOptions}>
+                  <ScrollView style={styles.dropdownScroll} nestedScrollEnabled={true}>
+                    {US_STATES.map((stateObj) => (
+                      <TouchableOpacity
+                        key={stateObj.value}
+                        style={[
+                          styles.dropdownOption,
+                          state === stateObj.value && styles.dropdownOptionSelected
+                        ]}
+                        onPress={() => handleStateSelect(stateObj.value)}
+                      >
+                        <Text style={[
+                          styles.dropdownOptionText,
+                          state === stateObj.value && styles.dropdownOptionTextSelected
+                        ]}>
+                          {stateObj.label}
+                        </Text>
+                      </TouchableOpacity>
                     ))}
-                  </Picker>
+                  </ScrollView>
                 </View>
-              </View>
-            </Modal>
+              )}
+            </View>
 
             <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
               <Text style={styles.signUpButtonText}>Sign Up</Text>
@@ -375,7 +401,12 @@ const styles = StyleSheet.create({
   nameInput: {
     flex: 1,
   },
-  stateSelector: {
+  // Custom dropdown styles
+  dropdownContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
+  dropdownButton: {
     backgroundColor: '#fff',
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -387,9 +418,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  stateSelectorText: {
+  dropdownButtonText: {
     fontSize: 16,
     color: '#1a1a1a',
+    flex: 1,
   },
   placeholderText: {
     color: '#999',
@@ -397,47 +429,44 @@ const styles = StyleSheet.create({
   dropdownArrow: {
     fontSize: 12,
     color: '#666',
+    marginLeft: 8,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
+  dropdownOptions: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '50%',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e1e3e6',
+    marginTop: 4,
+    maxHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 1001,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
+  dropdownScroll: {
+    maxHeight: 200,
+  },
+  dropdownOption: {
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e1e3e6',
+    borderBottomColor: '#f1f5f9',
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1a1a1a',
+  dropdownOptionSelected: {
+    backgroundColor: '#eff6ff',
   },
-  modalButton: {
+  dropdownOptionText: {
     fontSize: 16,
-    color: '#0066ff',
-    fontWeight: '500',
-  },
-  doneButton: {
-    fontWeight: '600',
-  },
-  modalPicker: {
-    height: 200,
-  },
-  pickerItem: {
-    fontSize: 18,
     color: '#1a1a1a',
-    textAlign: 'center',
+  },
+  dropdownOptionTextSelected: {
+    color: '#0066ff',
+    fontWeight: '600',
   },
   signUpButton: {
     backgroundColor: '#0066ff',
