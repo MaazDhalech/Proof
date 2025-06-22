@@ -23,6 +23,24 @@ export default function SignUpScreen() {
   const [dob, setDob] = useState('');
   const [state, setState] = useState('');
 
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (str: string) => {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
+  // Handle first name change with capitalization
+  const handleFirstNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setFirstName(capitalized);
+  };
+
+  // Handle last name change with capitalization
+  const handleLastNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setLastName(capitalized);
+  };
+
   const formatDate = (text: string) => {
     // Remove all non-numeric characters
     const cleaned = text.replace(/\D/g, '');
@@ -50,10 +68,6 @@ export default function SignUpScreen() {
       Alert.alert('Validation Error', 'Please fill all required fields');
       return;
     }
-
-    // Convert MM-DD-YYYY to YYYY-MM-DD for database storage
-    const [month, day, year] = dob.split('-');
-    const isoDate = year ? `${year}-${month}-${day}` : null;
 
     try {
       // 1. Create auth user
@@ -85,7 +99,7 @@ export default function SignUpScreen() {
             last_name: lastName,
             email,
             full_name: fullName,
-            dob: isoDate,
+            dob: dob, // Store date as entered (MM-DD-YYYY format)
             state: state,
             profile_picture: null,
             current_streak: 0,
@@ -184,7 +198,7 @@ export default function SignUpScreen() {
                   placeholder="John"
                   placeholderTextColor="#999"
                   value={firstName}
-                  onChangeText={setFirstName}
+                  onChangeText={handleFirstNameChange}
                   returnKeyType="next"
                 />
               </View>
@@ -195,7 +209,7 @@ export default function SignUpScreen() {
                   placeholder="Doe"
                   placeholderTextColor="#999"
                   value={lastName}
-                  onChangeText={setLastName}
+                  onChangeText={handleLastNameChange}
                   returnKeyType="next"
                 />
               </View>

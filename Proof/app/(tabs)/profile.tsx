@@ -58,6 +58,12 @@ export default function ProfileScreen() {
 
   const scrollViewRef = useRef<ScrollView>(null);
 
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (str: string) => {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
   // Helper function to format date for display without timezone issues
   const formatDateForDisplay = (dateString: string | undefined) => {
     if (!dateString) return 'Not set';
@@ -85,6 +91,18 @@ export default function ProfileScreen() {
     if (text.length > 10) return;
     const formatted = formatDOB(text);
     setTempData({...tempData, dob: formatted});
+  };
+
+  // Handle first name change with capitalization
+  const handleFirstNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setTempData({...tempData, first_name: capitalized});
+  };
+
+  // Handle last name change with capitalization
+  const handleLastNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setTempData({...tempData, last_name: capitalized});
   };
 
   useEffect(() => {
@@ -329,7 +347,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={tempData.first_name}
-                  onChangeText={(text) => setTempData({...tempData, first_name: text})}
+                  onChangeText={handleFirstNameChange}
                   placeholder="First Name"
                   returnKeyType="next"
                 />
@@ -340,7 +358,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={tempData.last_name}
-                  onChangeText={(text) => setTempData({...tempData, last_name: text})}
+                  onChangeText={handleLastNameChange}
                   placeholder="Last Name"
                   returnKeyType="next"
                 />
