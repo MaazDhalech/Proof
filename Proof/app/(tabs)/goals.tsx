@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import Chatbot from '@/components/Chatbot'; // Adjust path as needed
 
 type Goal = {
   id: string;
@@ -45,6 +46,11 @@ export default function GoalsPage() {
   const [userId, setUserId] = useState<string | undefined>();
 
   useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id);
+    };
+    getCurrentUser();
     loadUserAndData();
   }, [tab]);
 
@@ -556,6 +562,9 @@ export default function GoalsPage() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Add the Chatbot component - it includes the floating chat button */}
+      <Chatbot userId={userId} />
     </View>
   );
 }
