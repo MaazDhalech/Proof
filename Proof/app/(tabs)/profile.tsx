@@ -388,7 +388,7 @@ export default function ProfileScreen() {
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{stats.totalGoals}</Text>
-            <Text style={styles.statLabel}>Total Goals</Text>
+            <Text style={styles.statLabel}>Total Goals at the Moment</Text>
           </View>
         </View>
       </View>
