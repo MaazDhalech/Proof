@@ -60,17 +60,17 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="create"
+        name="goals"
         options={{
-          title: 'Create',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Goals',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="target" color={color} />,
         }}
       />
       <Tabs.Screen
-        name="check-in"
+        name="friends"
         options={{
-          title: 'Check In',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Friends',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="person.2.fill" color={color} />,
         }}
       />
       <Tabs.Screen
