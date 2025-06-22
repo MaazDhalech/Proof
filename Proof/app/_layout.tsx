@@ -78,7 +78,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={DefaultTheme}>
       <Slot />
-      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
+      <StatusBar style="dark" /> {/* Force dark status bar regardless of theme */}
     </ThemeProvider>
   );
-}
+  }

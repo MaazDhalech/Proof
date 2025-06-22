@@ -27,16 +27,16 @@ export default function HomeFeedScreen() {
 
   const fetchFeed = async (currentUserId: string) => {
     try {
-      // Get friend list
+      // ✅ Corrected: Get list of friend_ids from 'friendships' table
       const { data: friendData, error: friendError } = await supabase
-        .from('friends')
-        .select('friends')
+        .from('friendships')
+        .select('friend_id')
         .eq('user_id', currentUserId)
-        .single();
+        .eq('status', 'accepted');
 
       if (friendError) throw friendError;
 
-      const friendIds = friendData?.friends || [];
+      const friendIds = friendData?.map((entry) => entry.friend_id) || [];
 
       if (!friendIds.length) {
         setPosts([]);
@@ -44,7 +44,7 @@ export default function HomeFeedScreen() {
         return;
       }
 
-      // Get recent check-ins from friends
+      // ✅ Get recent posts from friends
       const { data: postData, error: postError } = await supabase
         .from('proof')
         .select(`

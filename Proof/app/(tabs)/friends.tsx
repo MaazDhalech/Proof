@@ -19,7 +19,7 @@ type Friend = {
 };
 
 export default function FriendsScreen() {
-  const [searchText, setSearchText] = useState<string>('');
+  const [searchText, setSearchText] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const router = useRouter();
@@ -30,6 +30,11 @@ export default function FriendsScreen() {
         data: { session },
         error,
       } = await supabase.auth.getSession();
+
+      if (error) {
+        console.error('Error fetching session:', error.message);
+        return;
+      }
 
       const currentUserId = session?.user?.id ?? null;
       setUserId(currentUserId);
@@ -103,14 +108,14 @@ export default function FriendsScreen() {
       <View style={styles.buttonGroup}>
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => router.push('/friends/requests')} // 👈 adjust route if needed
+          onPress={() => router.push('/(stack)/goals/friends/requests')}
         >
           <Text style={styles.buttonText}>Friend Requests</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => router.push('/friends/explore')} // 👈 adjust route if needed
+          onPress={() => router.push('/(stack)/goals/friends/explore')}
         >
           <Text style={styles.buttonText}>Add New Friends</Text>
         </TouchableOpacity>

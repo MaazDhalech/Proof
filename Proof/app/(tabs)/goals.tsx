@@ -1,6 +1,8 @@
-import { router } from 'expo-router';
-import React from 'react';
+import { supabase } from '@/services/supabase';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   SafeAreaView,
   StyleSheet,
@@ -9,36 +11,54 @@ import {
   View,
 } from 'react-native';
 
-const mockGoals = [
-  {
-    id: '1',
-    title: 'Read 10 pages daily',
-    category: 'Academics',
-    emoji: '📚',
-  },
-  {
-    id: '2',
-    title: 'Workout 5x a week',
-    category: 'Fitness',
-    emoji: '💪',
-  },
-  {
-    id: '3',
-    title: 'Sleep by 11 PM',
-    category: 'Health',
-    emoji: '😴',
-  },
-];
+type Goal = {
+  id: number;
+  title: string;
+  category: string;
+};
 
 export default function GoalsPage() {
-  const renderGoal = ({ item }: { item: typeof mockGoals[0] }) => (
+  const router = useRouter();
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchGoals = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const uid = session?.user.id;
+      if (!uid) return;
+
+      const { data, error } = await supabase
+        .from('challenges')
+        .select('id, name, description')
+        .eq('user_id', uid);
+
+      if (error) {
+        console.error('Error fetching goals:', error);
+      } else {
+        const formatted = data?.map((item) => ({
+          id: item.id,
+          title: item.name,
+          category: item.description,
+        }));
+        setGoals(formatted || []);
+      }
+
+      setLoading(false);
+    };
+
+    fetchGoals();
+  }, []);
+
+  const renderGoal = ({ item }: { item: Goal }) => (
     <View style={styles.goalCard}>
-      <Text style={styles.goalTitle}>{item.emoji} {item.title}</Text>
+      <Text style={styles.goalTitle}>{item.title}</Text>
       <Text style={styles.category}>{item.category}</Text>
       <TouchableOpacity
         style={styles.checkInButton}
-        onPress={() => router.push({ pathname: `/goals/${item.id}/checkin` })}
-
+        onPress={() => router.push(`/goals/${item.id}/check-in`)}
       >
         <Text style={styles.checkInText}>Check In</Text>
       </TouchableOpacity>
@@ -49,12 +69,17 @@ export default function GoalsPage() {
     <SafeAreaView style={styles.container}>
       <Text style={styles.header}>Your Goals</Text>
 
-      <FlatList
-        data={mockGoals}
-        keyExtractor={(item) => item.id}
-        renderItem={renderGoal}
-        contentContainerStyle={styles.goalList}
-      />
+      {loading ? (
+        <ActivityIndicator size="large" color="#007aff" />
+      ) : (
+        <FlatList
+          data={goals}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderGoal}
+          contentContainerStyle={styles.goalList}
+          ListEmptyComponent={<Text>No goals yet. Create one below!</Text>}
+        />
+      )}
 
       <TouchableOpacity
         style={styles.createButton}
