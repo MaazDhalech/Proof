@@ -263,7 +263,7 @@ export default function SignUpScreen() {
               returnKeyType="next"
             />
 
-            <Text style={styles.inputLabel}>State/Region *</Text>
+            <Text style={styles.inputLabel}>State *</Text>
             <TouchableOpacity 
               style={styles.stateSelector}
               onPress={handleOpenStatePicker}
