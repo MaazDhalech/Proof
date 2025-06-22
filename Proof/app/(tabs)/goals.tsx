@@ -340,7 +340,7 @@ export default function GoalsPage() {
           
           <View style={styles.statItem}>
             <Text style={styles.statLabel}>Frequency</Text>
-            <Text style={styles.statValue}>{item.frequency}x/week</Text>
+            <Text style={styles.statValue}>{item.frequency}x</Text>
           </View>
         </View>
 
