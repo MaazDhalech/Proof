@@ -6,6 +6,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -73,95 +74,129 @@ export default function CreateGoalScreen() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        
-        {/* Back Button */}
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{ marginTop: 20, marginBottom: 12 }}
-        >
-          <Text style={{ color: '#007aff', fontSize: 16 }}>← Back</Text>
-        </TouchableOpacity>
+    <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardContainer}>
+        <ScrollView contentContainerStyle={styles.content}>
+          
+          {/* Back Button */}
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Text style={styles.backButtonText}>← Back</Text>
+          </TouchableOpacity>
 
-        <Text style={styles.heading}>Create New Goal</Text>
+          <Text style={styles.heading}>Create New Goal</Text>
 
-        <TextInput placeholder="Goal Title *" style={styles.input} value={name} onChangeText={setName} />
-        <TextInput
-          placeholder="Description (optional)"
-          style={[styles.input, { height: 100 }]}
-          multiline
-          value={description}
-          onChangeText={setDescription}
-        />
+          <TextInput placeholder="Goal Title *" style={styles.input} value={name} onChangeText={setName} />
+          <TextInput
+            placeholder="Description (optional)"
+            style={[styles.input, { height: 100 }]}
+            multiline
+            value={description}
+            onChangeText={setDescription}
+          />
 
-        <Text style={styles.label}>Goal Type</Text>
-        <View style={styles.row}>
-          {['manual', 'scheduled'].map((type) => (
-            <TouchableOpacity
-              key={type}
-              onPress={() => setGoalType(type as 'manual' | 'scheduled')}
-              style={[
-                styles.typeButton,
-                goalType === type && styles.selectedButton,
-              ]}
-            >
-              <Text style={goalType === type ? styles.selectedText : styles.buttonText}>
-                {type}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+          <Text style={styles.label}>Goal Type</Text>
+          <View style={styles.row}>
+            {['manual', 'scheduled'].map((type) => (
+              <TouchableOpacity
+                key={type}
+                onPress={() => setGoalType(type as 'manual' | 'scheduled')}
+                style={[
+                  styles.typeButton,
+                  goalType === type && styles.selectedButton,
+                ]}
+              >
+                <Text style={goalType === type ? styles.selectedText : styles.buttonText}>
+                  {type}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        {goalType === 'scheduled' && (
-          <>
-            <Text style={styles.label}>Check-In Frequency</Text>
-            <View style={styles.row}>
-              {['daily', 'weekly', 'monthly'].map((freq) => (
-                <TouchableOpacity
-                  key={freq}
-                  onPress={() => setCheckinFreq(freq as any)}
-                  style={[
-                    styles.typeButton,
-                    checkinFreq === freq && styles.selectedButton,
-                  ]}
-                >
-                  <Text style={checkinFreq === freq ? styles.selectedText : styles.buttonText}>
-                    {freq}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        )}
+          {goalType === 'scheduled' && (
+            <>
+              <Text style={styles.label}>Check-In Frequency</Text>
+              <View style={styles.row}>
+                {['daily', 'weekly', 'monthly'].map((freq) => (
+                  <TouchableOpacity
+                    key={freq}
+                    onPress={() => setCheckinFreq(freq as any)}
+                    style={[
+                      styles.typeButton,
+                      checkinFreq === freq && styles.selectedButton,
+                    ]}
+                  >
+                    <Text style={checkinFreq === freq ? styles.selectedText : styles.buttonText}>
+                      {freq}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          )}
 
-        <Text style={styles.label}>Start Date</Text>
-        <DateTimePicker value={startDate} mode="date" onChange={(_, date) => date && setStartDate(date)} />
+          <Text style={styles.label}>Start Date</Text>
+          <DateTimePicker value={startDate} mode="date" onChange={(_, date) => date && setStartDate(date)} />
 
-        <Text style={styles.label}>Target Date</Text>
-        <DateTimePicker value={targetDate} mode="date" onChange={(_, date) => date && setTargetDate(date)} />
+          <Text style={styles.label}>Target Date</Text>
+          <DateTimePicker value={targetDate} mode="date" onChange={(_, date) => date && setTargetDate(date)} />
 
-        <Text style={styles.label}>Check-In Time</Text>
-        <DateTimePicker value={checkinTime} mode="time" onChange={(_, date) => date && setCheckinTime(date)} />
+          <Text style={styles.label}>Check-In Time</Text>
+          <DateTimePicker value={checkinTime} mode="time" onChange={(_, date) => date && setCheckinTime(date)} />
 
-        <Text style={styles.label}>Optional End Date</Text>
-        <DateTimePicker value={endDate || new Date()} mode="date" onChange={(_, date) => date && setEndDate(date)} />
+          <Text style={styles.label}>Optional End Date</Text>
+          <DateTimePicker value={endDate || new Date()} mode="date" onChange={(_, date) => date && setEndDate(date)} />
 
-        <TouchableOpacity
-          style={[styles.submitButton, loading && { backgroundColor: '#888' }]}
-          onPress={handleSubmit}
-          disabled={loading}
-        >
-          <Text style={styles.submitText}>{loading ? 'Creating...' : 'Create Goal'}</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <TouchableOpacity
+            style={[styles.submitButton, loading && { backgroundColor: '#888' }]}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            <Text style={styles.submitText}>{loading ? 'Creating...' : 'Create Goal'}</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 24 },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#f8f9fa',
+  },
+  keyboardContainer: {
+    flex: 1,
+  },
+  content: { 
+    padding: 24,
+    paddingTop: 16,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#e1e3e6',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  backButtonText: {
+    color: '#0066ff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   heading: { fontSize: 26, fontWeight: 'bold', marginBottom: 24, color: '#111' },
   input: {
     borderWidth: 1,

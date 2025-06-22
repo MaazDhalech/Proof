@@ -49,7 +49,6 @@ export default function ExploreFriendsScreen() {
 
     const friendIds = existingRelations?.map((f) => f.friend_id) || [];
     const excludedIds = [...friendIds, uid];
-
     const formattedList = `(${excludedIds.map((id) => `"${id}"`).join(',')})`;
 
     const { data: profiles, error: userError } = await supabase
@@ -89,6 +88,13 @@ export default function ExploreFriendsScreen() {
     }
   };
 
+  const getInitials = (name: string) => {
+    if (!name || name.trim() === '') return '?';
+    const words = name.trim().split(' ');
+    if (words.length === 1) return words[0].charAt(0).toUpperCase();
+    return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase();
+  };
+
   const filteredUsers = allUsers.filter(
     (user) =>
       user.name.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -97,8 +103,15 @@ export default function ExploreFriendsScreen() {
 
   const renderUser = ({ item }: { item: User }) => (
     <View style={styles.card}>
-      <Text style={styles.name}>{item.name}</Text>
-      <Text style={styles.username}>@{item.username}</Text>
+      <View style={styles.userInfo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(item.name || item.username)}</Text>
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={styles.name}>{item.name}</Text>
+          <Text style={styles.username}>@{item.username}</Text>
+        </View>
+      </View>
       <TouchableOpacity
         style={styles.button}
         onPress={() => sendFriendRequest(item.id)}
@@ -110,92 +123,121 @@ export default function ExploreFriendsScreen() {
 
   return (
     <View style={styles.container}>
-  {/* Back Button with spacing */}
-  <View style={styles.backButtonWrapper}>
-    <TouchableOpacity onPress={() => router.push('/friends')} style={styles.backButton}>
-      <Text style={styles.backText}>← Back</Text>
-    </TouchableOpacity>
-  </View>
+      <TouchableOpacity
+        onPress={() => router.push('/friends')}
+        style={styles.backButton}
+      >
+        <Text style={styles.backButtonText}>← Back</Text>
+      </TouchableOpacity>
 
-  <Text style={styles.heading}>Explore New Friends</Text>
+      <Text style={styles.heading}>Explore New Friends</Text>
 
-  <TextInput
-    style={styles.searchInput}
-    placeholder="Search users..."
-    value={searchText}
-    onChangeText={setSearchText}
-  />
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search users..."
+        value={searchText}
+        onChangeText={setSearchText}
+      />
 
-  <FlatList
-    data={filteredUsers}
-    keyExtractor={(item) => item.id}
-    renderItem={renderUser}
-    contentContainerStyle={{ paddingBottom: 100 }}
-  />
-</View>
+      <FlatList
+        data={filteredUsers}
+        keyExtractor={(item) => item.id}
+        renderItem={renderUser}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      paddingTop: 60,
-      paddingHorizontal: 20,
-      backgroundColor: '#fff',
-    },
-    backButtonWrapper: {
-      marginBottom: 10,
-      marginTop: 10,
-    },
-    backButton: {
-      padding: 8,
-      alignSelf: 'flex-start',
-    },
-    backText: {
-      color: '#007aff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    heading: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      marginBottom: 20,
-      color: '#111',
-    },
-    searchInput: {
-      height: 40,
-      borderColor: '#ccc',
-      borderWidth: 1,
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      marginBottom: 16,
-      backgroundColor: '#f9f9f9',
-    },
-    card: {
-      backgroundColor: '#f1f1f1',
-      padding: 16,
-      borderRadius: 10,
-      marginBottom: 12,
-    },
-    name: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: '#111',
-    },
-    username: {
-      fontSize: 14,
-      color: '#666',
-      marginTop: 4,
-    },
-    button: {
-      marginTop: 8,
-      backgroundColor: '#007aff',
-      padding: 10,
-      borderRadius: 6,
-      alignItems: 'center',
-    },
-    buttonText: {
-      color: '#fff',
-      fontWeight: '600',
-    },
-  });
+  container: {
+    flex: 1,
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    backgroundColor: '#fff',
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#e1e3e6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  backButtonText: {
+    color: '#0066ff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  heading: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#111',
+  },
+  searchInput: {
+    height: 40,
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    backgroundColor: '#f9f9f9',
+  },
+  card: {
+    backgroundColor: '#f1f1f1',
+    padding: 16,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6366f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  textContainer: {
+    flex: 1,
+  },
+  name: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111',
+  },
+  username: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+  },
+  button: {
+    marginTop: 8,
+    backgroundColor: '#007aff',
+    padding: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+});

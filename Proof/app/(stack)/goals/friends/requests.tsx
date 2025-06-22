@@ -71,14 +71,7 @@ export default function FriendRequestsScreen() {
     }
 
     const formatted: UserRequest[] = (data as FriendshipRecord[]).map((req) => {
-      let profile: Profile | null = null;
-
-      if (Array.isArray(req.profile)) {
-        profile = req.profile[0] ?? null;
-      } else if (req.profile) {
-        profile = req.profile;
-      }
-
+      const profile = Array.isArray(req.profile) ? req.profile[0] : req.profile;
       return {
         id: req.user_id,
         name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
@@ -101,10 +94,23 @@ export default function FriendRequestsScreen() {
     setRequests((prev) => prev.filter((r) => r.requestId !== requestId));
   };
 
+  const getInitials = (name: string) => {
+    if (!name || name.trim() === '') return '?';
+    const words = name.trim().split(' ');
+    return (words[0][0] + (words[1]?.[0] ?? '')).toUpperCase();
+  };
+
   const renderRequest = ({ item }: { item: UserRequest }) => (
     <View style={styles.card}>
-      <Text style={styles.name}>{item.name}</Text>
-      <Text style={styles.username}>@{item.username}</Text>
+      <View style={styles.userInfo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={styles.name}>{item.name}</Text>
+          <Text style={styles.username}>@{item.username}</Text>
+        </View>
+      </View>
       <View style={styles.buttonRow}>
         <TouchableOpacity
           style={[styles.button, styles.accept]}
@@ -125,7 +131,7 @@ export default function FriendRequestsScreen() {
   return (
     <View style={styles.container}>
       <TouchableOpacity onPress={() => router.push('/friends')} style={styles.backButton}>
-        <Text style={styles.backText}>← Back</Text>
+        <Text style={styles.backButtonText}>← Back</Text>
       </TouchableOpacity>
 
       <Text style={styles.heading}>Friend Requests</Text>
@@ -153,12 +159,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   backButton: {
-    padding: 8,
     alignSelf: 'flex-start',
-    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#e1e3e6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  backText: {
-    color: '#007aff',
+  backButtonText: {
+    color: '#0066ff',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -173,6 +189,28 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 10,
     marginBottom: 12,
+  },
+  userInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#6366f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  textContainer: {
+    flex: 1,
   },
   name: {
     fontSize: 18,

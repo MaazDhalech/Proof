@@ -20,7 +20,6 @@ type Friend = {
   friendshipId: string;
 };
 
-
 export default function FriendsScreen() {
   const [searchText, setSearchText] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
@@ -75,16 +74,16 @@ export default function FriendsScreen() {
       `)
       .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
       .eq('status', 'accepted');
-  
+
     if (error) {
       console.error('Error fetching friends:', error);
       return;
     }
-  
+
     const formatted: Friend[] = data.map((item: any) => {
       const isUserSender = item.user_id === userId;
       const profile = isUserSender ? item.receiver : item.sender;
-  
+
       return {
         id: profile.id,
         name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
@@ -92,10 +91,9 @@ export default function FriendsScreen() {
         friendshipId: item.id,
       };
     });
-  
+
     setFriends(formatted);
   };
-  
 
   const handleUnfriend = async (friendId: string) => {
     if (!userId) return;
@@ -122,6 +120,14 @@ export default function FriendsScreen() {
     }
   };
 
+  const getInitials = (name: string) => {
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) {
+      return parts[0].charAt(0).toUpperCase();
+    }
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  };
+
   const filteredFriends = friends.filter((friend) =>
     friend.name.toLowerCase().includes(searchText.toLowerCase()) ||
     friend.username.toLowerCase().includes(searchText.toLowerCase())
@@ -129,8 +135,15 @@ export default function FriendsScreen() {
 
   const renderFriend = ({ item }: { item: Friend }) => (
     <View style={styles.friendCard}>
-      <Text style={styles.friendName}>{item.name}</Text>
-      <Text style={styles.friendUsername}>@{item.username}</Text>
+      <View style={styles.friendInfo}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
+        </View>
+        <View style={styles.friendDetails}>
+          <Text style={styles.friendName}>{item.name}</Text>
+          <Text style={styles.friendUsername}>@{item.username}</Text>
+        </View>
+      </View>
       <TouchableOpacity
         style={styles.unfriendButton}
         onPress={() => handleUnfriend(item.id)}
@@ -203,14 +216,37 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 12,
   },
+  friendInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#6366f1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  friendDetails: {
+    flex: 1,
+  },
   friendName: { fontSize: 18, fontWeight: '600', color: '#111' },
-  friendUsername: { fontSize: 14, color: '#666', marginTop: 4 },
+  friendUsername: { fontSize: 14, color: '#666', marginTop: 2 },
   unfriendButton: {
-    marginTop: 8,
     backgroundColor: '#dc3545',
     padding: 8,
     borderRadius: 6,
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
   },
   unfriendText: { color: '#fff', fontWeight: '600' },
   buttonGroup: {
