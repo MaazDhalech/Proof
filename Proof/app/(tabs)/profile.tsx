@@ -58,6 +58,26 @@ export default function ProfileScreen() {
 
   const scrollViewRef = useRef<ScrollView>(null);
 
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (str: string) => {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
+  // Helper function to format date for display without timezone issues
+  const formatDateForDisplay = (dateString: string | undefined) => {
+    if (!dateString) return 'Not set';
+    
+    // If it's already in MM/DD/YYYY format, return as is
+    if (dateString.includes('/')) {
+      return dateString;
+    }
+    
+    // If it's in ISO format (YYYY-MM-DD), parse it without timezone conversion
+    const [year, month, day] = dateString.split('-');
+    return `${month}/${day}/${year}`;
+  };
+
   // Format DOB with slashes while typing
   const formatDOB = (input: string) => {
     const numbersOnly = input.replace(/\D/g, '');
@@ -71,6 +91,18 @@ export default function ProfileScreen() {
     if (text.length > 10) return;
     const formatted = formatDOB(text);
     setTempData({...tempData, dob: formatted});
+  };
+
+  // Handle first name change with capitalization
+  const handleFirstNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setTempData({...tempData, first_name: capitalized});
+  };
+
+  // Handle last name change with capitalization
+  const handleLastNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setTempData({...tempData, last_name: capitalized});
   };
 
   useEffect(() => {
@@ -112,7 +144,7 @@ export default function ProfileScreen() {
           last_name: userData.last_name,
           username: userData.username,
           email: userData.email,
-          dob: userData.dob || '',
+          dob: formatDateForDisplay(userData.dob),
           state: userData.state || ''
         });
 
@@ -128,8 +160,7 @@ export default function ProfileScreen() {
         console.error('Error fetching user data:', error);
         await supabase.auth.signOut(); // Force logout
         router.replace('/(auth)/signin'); // Redirect to login
-      }
-       finally {
+      } finally {
         setLoading(false);
       }
     };
@@ -148,7 +179,7 @@ export default function ProfileScreen() {
         last_name: user.last_name,
         username: user.username,
         email: user.email,
-        dob: user.dob || '',
+        dob: formatDateForDisplay(user.dob),
         state: user.state || ''
       });
     }
@@ -271,7 +302,7 @@ export default function ProfileScreen() {
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Birthday</Text>
           <Text style={styles.detailValue}>
-            {user.dob ? new Date(user.dob).toLocaleDateString() : 'Not set'}
+            {formatDateForDisplay(user.dob)}
           </Text>
         </View>
         
@@ -316,7 +347,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={tempData.first_name}
-                  onChangeText={(text) => setTempData({...tempData, first_name: text})}
+                  onChangeText={handleFirstNameChange}
                   placeholder="First Name"
                   returnKeyType="next"
                 />
@@ -327,7 +358,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.modalInput}
                   value={tempData.last_name}
-                  onChangeText={(text) => setTempData({...tempData, last_name: text})}
+                  onChangeText={handleLastNameChange}
                   placeholder="Last Name"
                   returnKeyType="next"
                 />

@@ -2,16 +2,16 @@ import { supabase } from '@/services/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 export default function SignUpScreen() {
@@ -23,44 +23,118 @@ export default function SignUpScreen() {
   const [dob, setDob] = useState('');
   const [state, setState] = useState('');
 
+  // Helper function to capitalize first letter
+  const capitalizeFirstLetter = (str: string) => {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
+  // Handle first name change with capitalization
+  const handleFirstNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setFirstName(capitalized);
+  };
+
+  // Handle last name change with capitalization
+  const handleLastNameChange = (text: string) => {
+    const capitalized = capitalizeFirstLetter(text);
+    setLastName(capitalized);
+  };
+
+  const formatDate = (text: string) => {
+    // Remove all non-numeric characters
+    const cleaned = text.replace(/\D/g, '');
+    
+    // Format as MM-DD-YYYY
+    if (cleaned.length >= 8) {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
+    } else if (cleaned.length >= 6) {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4)}`;
+    } else if (cleaned.length >= 4) {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2)}`;
+    } else if (cleaned.length >= 2) {
+      return `${cleaned.slice(0, 2)}-${cleaned.slice(2)}`;
+    }
+    return cleaned;
+  };
+
+  const handleDateChange = (text: string) => {
+    const formatted = formatDate(text);
+    setDob(formatted);
+  };
+
   const handleSignUp = async () => {
-    if (!username) {
-      Alert.alert('Validation Error', 'Please enter a username.');
-      return;
-    }
-    if (!email) {
-      Alert.alert('Validation Error', 'Please enter an email.');
-      return;
-    }
-    if (!password) {
-      Alert.alert('Validation Error', 'Please enter a password.');
+    if (!username || !email || !password || !firstName || !lastName || !dob || !state) {
+      Alert.alert('Validation Error', 'Please fill all required fields');
       return;
     }
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
+      // 1. Create auth user
+      const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { username },
+          data: { 
+            username,
+            first_name: firstName,
+            last_name: lastName
+          },
         },
       });
 
       if (signUpError) throw signUpError;
 
-      Alert.alert(
-        'Welcome!',
-        'Thanks for signing up! Please check your email to verify your account.',
-        [{ text: 'OK' }]
-      );
-        router.replace('/(auth)/signin')
-    } catch (error) {
-      if (error instanceof Error) {
-        Alert.alert('Error', error.message);
-      } else {
-        Alert.alert('Error', 'An unknown error occurred.');
+      // 2. If signup successful, create profile record
+      if (authData.user) {
+        // Create full_name from first and last name
+        const fullName = [firstName.trim(), lastName.trim()].filter(name => name.length > 0).join(' ') || null;
+        
+        const { error: profileError } = await supabase
+          .from('profile')
+          .insert({
+            id: authData.user.id,
+            username,
+            first_name: firstName,
+            last_name: lastName,
+            email,
+            full_name: fullName,
+            dob: dob, // Store date as entered (MM-DD-YYYY format)
+            state: state,
+            profile_picture: null,
+            current_streak: 0,
+            goals_completed: 0,
+            longest_streak: 0,
+            goal_completion_rate: 0.0,
+            last_checkin: null,
+            is_private: false
+          });
+
+        if (profileError) {
+          if (profileError.code === '23505' && profileError.message.includes('username')) {
+            throw new Error('Username already exists. Please choose a different username.');
+          }
+          throw profileError;
+        }
       }
+
+      Alert.alert(
+        'Account Created!',
+        `Welcome ${firstName}! Please check your email to verify your account before signing in.`,
+        [{ text: 'OK', onPress: () => router.replace('/(auth)/signin') }]
+      );
+
+    } catch (error) {
+      console.error('Sign up error:', error);
+      Alert.alert(
+        'Sign Up Failed',
+        error instanceof Error ? error.message : 'An unknown error occurred'
+      );
     }
+  };
+
+  const handleBackToSignIn = () => {
+    router.replace('/(auth)/signin');
   };
 
   return (
@@ -82,7 +156,7 @@ export default function SignUpScreen() {
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.inputLabel}>Username</Text>
+            <Text style={styles.inputLabel}>Username *</Text>
             <TextInput
               style={styles.input}
               placeholder="Enter your username"
@@ -93,7 +167,7 @@ export default function SignUpScreen() {
               returnKeyType="next"
             />
 
-            <Text style={styles.inputLabel}>Email</Text>
+            <Text style={styles.inputLabel}>Email *</Text>
             <TextInput
               style={styles.input}
               placeholder="Enter your email"
@@ -105,7 +179,7 @@ export default function SignUpScreen() {
               returnKeyType="next"
             />
 
-            <Text style={styles.inputLabel}>Password</Text>
+            <Text style={styles.inputLabel}>Password *</Text>
             <TextInput
               style={styles.input}
               placeholder="Create a password"
@@ -118,41 +192,42 @@ export default function SignUpScreen() {
 
             <View style={styles.nameContainer}>
               <View style={[styles.nameInput, { marginRight: 10 }]}>
-                <Text style={styles.inputLabel}>First Name</Text>
+                <Text style={styles.inputLabel}>First Name *</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="John"
                   placeholderTextColor="#999"
                   value={firstName}
-                  onChangeText={setFirstName}
+                  onChangeText={handleFirstNameChange}
                   returnKeyType="next"
                 />
               </View>
               <View style={styles.nameInput}>
-                <Text style={styles.inputLabel}>Last Name</Text>
+                <Text style={styles.inputLabel}>Last Name *</Text>
                 <TextInput
                   style={styles.input}
                   placeholder="Doe"
                   placeholderTextColor="#999"
                   value={lastName}
-                  onChangeText={setLastName}
+                  onChangeText={handleLastNameChange}
                   returnKeyType="next"
                 />
               </View>
             </View>
 
-            <Text style={styles.inputLabel}>Date of Birth</Text>
+            <Text style={styles.inputLabel}>Date of Birth (MM-DD-YYYY) *</Text>
             <TextInput
               style={styles.input}
-              placeholder="YYYY-MM-DD"
+              placeholder="MM-DD-YYYY"
               placeholderTextColor="#999"
               value={dob}
-              onChangeText={setDob}
-              keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
+              onChangeText={handleDateChange}
+              keyboardType="numeric"
+              maxLength={10}
               returnKeyType="next"
             />
 
-            <Text style={styles.inputLabel}>State/Region</Text>
+            <Text style={styles.inputLabel}>State/Region *</Text>
             <TextInput
               style={styles.input}
               placeholder="California"
@@ -164,6 +239,10 @@ export default function SignUpScreen() {
 
             <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
               <Text style={styles.signUpButtonText}>Sign Up</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.backButton} onPress={handleBackToSignIn}>
+              <Text style={styles.backButtonText}>Already Have an Account?</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -234,6 +313,21 @@ const styles = StyleSheet.create({
   },
   signUpButtonText: {
     color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  backButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#0066ff',
+  },
+  backButtonText: {
+    color: '#0066ff',
     fontSize: 16,
     fontWeight: '600',
   },
