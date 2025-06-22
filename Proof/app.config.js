@@ -41,6 +41,7 @@ export default {
     extra: {
       ANON_PUBLIC_KEY: process.env.ANON_PUBLIC_KEY,
       SUPABASE_URL: process.env.SUPABASE_URL,
+      SERVICE_ROLE_KEY: process.env.SERVICE_ROLE_KEY,
       LETTA_CHATBOT_MODEL: process.env.LETTA_CHATBOT_MODEL,
       LETTA_API_KEY: process.env.LETTA_API_KEY,
       LETTA_IMAGE_VERIFIER_MODEL: process.env.LETTA_IMAGE_VERIFIER_MODEL,

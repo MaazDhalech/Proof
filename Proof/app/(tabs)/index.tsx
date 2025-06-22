@@ -7,13 +7,33 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
-  View
+  TouchableOpacity,
+  View,
+  Alert
 } from 'react-native';
 
+interface Post {
+  id: string;
+  user_id: string;
+  caption: string;
+  created_at: string;
+  picture_url: string;
+  likes: number;
+  profile: {
+    username: string;
+    profile_picture: string;
+  };
+  challenges: {
+    name: string;
+  };
+  userHasLiked?: boolean;
+}
+
 export default function HomeFeedScreen() {
-  const [posts, setPosts] = useState<any[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const getCurrentUser = async () => {
@@ -58,6 +78,8 @@ export default function HomeFeedScreen() {
           user_id,
           caption,
           created_at,
+          picture_url,
+          likes,
           profile (
             username,
             profile_picture
@@ -71,7 +93,26 @@ export default function HomeFeedScreen() {
 
       if (postError) throw postError;
 
-      setPosts(postData);
+      // Check which posts the current user has liked
+      const postIds = postData?.map(post => post.id) || [];
+      const { data: userLikes, error: likesError } = await supabase
+        .from('user_likes')
+        .select('proof_id')
+        .eq('user_id', currentUserId)
+        .in('proof_id', postIds);
+
+      if (likesError) {
+        console.warn('Could not fetch user likes:', likesError);
+      }
+
+      const likedPostIds = new Set(userLikes?.map(like => like.proof_id) || []);
+
+      const postsWithLikeStatus = postData?.map(post => ({
+        ...post,
+        userHasLiked: likedPostIds.has(post.id)
+      })) || [];
+
+      setPosts(postsWithLikeStatus);
     } catch (err) {
       console.error('Feed load error:', err);
     } finally {
@@ -79,7 +120,74 @@ export default function HomeFeedScreen() {
     }
   };
 
-  const renderPost = ({ item }: { item: any }) => (
+  const handleLike = async (postId: string, currentLikes: number, userHasLiked: boolean) => {
+    if (!userId || likingPosts.has(postId)) return;
+
+    setLikingPosts(prev => new Set(prev).add(postId));
+
+    try {
+      if (userHasLiked) {
+        // Unlike the post
+        const { error: unlikeError } = await supabase
+          .from('user_likes')
+          .delete()
+          .eq('user_id', userId)
+          .eq('proof_id', postId);
+
+        if (unlikeError) throw unlikeError;
+
+        const { error: decrementError } = await supabase
+          .from('proof')
+          .update({ likes: Math.max(0, currentLikes - 1) })
+          .eq('id', postId);
+
+        if (decrementError) throw decrementError;
+
+        // Update local state
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: Math.max(0, post.likes - 1), userHasLiked: false }
+              : post
+          )
+        );
+      } else {
+        // Like the post
+        const { error: likeError } = await supabase
+          .from('user_likes')
+          .insert({ user_id: userId, proof_id: postId });
+
+        if (likeError) throw likeError;
+
+        const { error: incrementError } = await supabase
+          .from('proof')
+          .update({ likes: currentLikes + 1 })
+          .eq('id', postId);
+
+        if (incrementError) throw incrementError;
+
+        // Update local state
+        setPosts(prevPosts => 
+          prevPosts.map(post => 
+            post.id === postId 
+              ? { ...post, likes: post.likes + 1, userHasLiked: true }
+              : post
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Error toggling like:', error);
+      Alert.alert('Error', 'Failed to update like. Please try again.');
+    } finally {
+      setLikingPosts(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(postId);
+        return newSet;
+      });
+    }
+  };
+
+  const renderPost = ({ item }: { item: Post }) => (
     <View style={styles.post}>
       <View style={styles.userRow}>
         <Image
@@ -92,8 +200,21 @@ export default function HomeFeedScreen() {
         </View>
       </View>
 
-      <Image source={{ uri: item.picture }} style={styles.image} />
+      <Image source={{ uri: `data:image/jpeg;base64,${item.picture_url}` }} style={styles.image} />
       {item.caption && <Text style={styles.caption}>{item.caption}</Text>}
+      
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={[styles.likeButton, item.userHasLiked && styles.likeButtonActive]}
+          onPress={() => handleLike(item.id, item.likes, item.userHasLiked || false)}
+          disabled={likingPosts.has(item.id)}
+        >
+          <Text style={[styles.likeButtonText, item.userHasLiked && styles.likeButtonTextActive]}>
+            {likingPosts.has(item.id) ? '...' : item.userHasLiked ? '❤️' : '🤍'} {item.likes || 0}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       <Text style={styles.timestamp}>
         {new Date(item.created_at).toLocaleString()}
       </Text>
@@ -178,6 +299,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     color: '#333',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  likeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#e8e8e8',
+  },
+  likeButtonActive: {
+    backgroundColor: '#ffe8e8',
+  },
+  likeButtonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  likeButtonTextActive: {
+    color: '#e91e63',
   },
   timestamp: {
     fontSize: 12,
