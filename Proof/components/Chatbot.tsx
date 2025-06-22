@@ -370,8 +370,8 @@ function Chatbot({ userId }: ChatbotProps) {
 
   // Calculate dynamic heights
   const modalHeight = keyboardHeight > 0 
-    ? screenHeight - keyboardHeight - (Platform.OS === 'ios' ? 0 : 0)
-    : screenHeight * 0.75;
+  ? screenHeight - keyboardHeight - (Platform.OS === 'ios' ? 0 : 0)
+  : screenHeight * 0.5; // Reduced from 0.75 to 0.5
 
   return (
     <>
@@ -525,7 +525,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingTop: 8,
-    maxHeight: screenHeight * 0.9, // Prevent exceeding screen
+    // Reduced height - was screenHeight * 0.75, now much smaller
+    maxHeight: screenHeight * 0.5, // 50% of screen instead of 75%
   },
   dragHandle: {
     width: 40,
@@ -533,47 +534,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#ddd',
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: 12,
+    marginBottom: 8, // Reduced from 12
   },
   chatHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingBottom: 15,
+    paddingBottom: 10, // Reduced from 15
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   chatTitle: {
-    fontSize: 18,
+    fontSize: 16, // Reduced from 18
     fontWeight: 'bold',
     color: '#111',
   },
   closeButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    width: 28, // Reduced from 30
+    height: 28, // Reduced from 30
+    borderRadius: 14,
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
   },
   closeButtonText: {
-    fontSize: 16,
+    fontSize: 14, // Reduced from 16
     color: '#666',
   },
   messagesList: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16, // Reduced from 20
+    maxHeight: screenHeight * 0.3, // Limit messages area height
   },
   messagesContent: {
-    paddingVertical: 10,
+    paddingVertical: 8, // Reduced from 10
     flexGrow: 1,
   },
   messageContainer: {
-    marginVertical: 5,
+    marginVertical: 3, // Reduced from 5
     maxWidth: '80%',
-    padding: 12,
-    borderRadius: 15,
+    padding: 10, // Reduced from 12
+    borderRadius: 12, // Reduced from 15
   },
   userMessage: {
     alignSelf: 'flex-end',
@@ -584,8 +586,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
   },
   messageText: {
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 14, // Reduced from 16
+    lineHeight: 18, // Reduced from 20
   },
   userMessageText: {
     color: '#fff',
@@ -594,51 +596,51 @@ const styles = StyleSheet.create({
     color: '#111',
   },
   timestamp: {
-    fontSize: 12,
+    fontSize: 11, // Reduced from 12
     color: '#999',
-    marginTop: 4,
+    marginTop: 3, // Reduced from 4
   },
   loadingContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 16, // Reduced from 20
+    paddingVertical: 6, // Reduced from 10
     alignItems: 'flex-start',
   },
   loadingText: {
-    fontSize: 14,
+    fontSize: 13, // Reduced from 14
     color: '#666',
     fontStyle: 'italic',
   },
   inputContainer: {
     flexDirection: 'row',
-    padding: 20,
-    paddingTop: 15,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 15,
+    padding: 16, // Reduced from 20
+    paddingTop: 12, // Reduced from 15
+    paddingBottom: Platform.OS === 'ios' ? 16 : 12, // Reduced
     borderTopWidth: 1,
     borderTopColor: '#eee',
     alignItems: 'flex-end',
     backgroundColor: '#fff',
-    minHeight: 70, // Ensure minimum height
+    minHeight: 60, // Reduced from 70
   },
   textInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#ddd',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    marginRight: 10,
-    maxHeight: 80, // Reduced max height
-    minHeight: 40, // Minimum height
-    fontSize: 16,
+    borderRadius: 18, // Reduced from 20
+    paddingHorizontal: 12, // Reduced from 15
+    paddingVertical: 8, // Reduced from 12
+    marginRight: 8, // Reduced from 10
+    maxHeight: 70, // Keep same
+    minHeight: 36, // Reduced from 40
+    fontSize: 14, // Reduced from 16
     backgroundColor: '#fff',
     textAlignVertical: 'center',
   },
   sendButton: {
     backgroundColor: '#007aff',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 20,
-    minHeight: 40, // Match text input min height
+    paddingHorizontal: 16, // Reduced from 20
+    paddingVertical: 8, // Reduced from 12
+    borderRadius: 18, // Reduced from 20
+    minHeight: 36, // Reduced from 40
     justifyContent: 'center',
   },
   sendButtonDisabled: {
@@ -647,7 +649,7 @@ const styles = StyleSheet.create({
   sendButtonText: {
     color: '#fff',
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 14, // Reduced from 16
   },
 });
 
