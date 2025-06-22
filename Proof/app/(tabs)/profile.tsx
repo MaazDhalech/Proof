@@ -24,12 +24,12 @@ type UserProfile = {
   avatar_url?: string;
   dob?: string;
   state?: string;
-  current_streak?: number;
   longest_streak?: number;
+  goals_completed?: number;
+  total_goals?: number;
 };
 
 type UserStats = {
-  currentStreak: number;
   goalsCompleted: number;
   longestStreak: number;
   completionRate: number;
@@ -40,7 +40,6 @@ export default function ProfileScreen() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<UserStats>({
-    currentStreak: 0,
     goalsCompleted: 0,
     longestStreak: 0,
     completionRate: 0,
@@ -119,24 +118,30 @@ export default function ProfileScreen() {
 
         if (profileError) throw profileError;
 
-        const { count: completedGoalsCount } = await supabase
-          .from('goals')
-          .select('*', { count: 'exact' })
-          .eq('user_id', authUser.id)
-          .eq('completed', true);
-
-        const { count: totalGoalsCount } = await supabase
-          .from('goals')
-          .select('*', { count: 'exact' })
+        // Count total challenges for this user
+        const { count: totalChallenges, error: challengesError } = await supabase
+          .from('challenges')
+          .select('*', { count: 'exact', head: true })
           .eq('user_id', authUser.id);
 
-        const completionRate = totalGoalsCount && completedGoalsCount ? 
-          Math.round((completedGoalsCount / totalGoalsCount) * 100) : 0;
+        if (challengesError) {
+          throw challengesError;
+        }
 
         const userData = {
           ...profileData,
           email: authUser.email
         };
+
+        // Use the count from the query
+        const totalGoals = totalChallenges || 0;
+        
+        // For now, we'll use the goals_completed from profile if it exists
+        // Otherwise default to 0
+        const goalsCompleted = profileData.goals_completed || 0;
+        
+        const completionRate = totalGoals > 0 ? 
+          Math.round((goalsCompleted / totalGoals) * 100) : 0;
 
         setUser(userData);
         setTempData({
@@ -149,11 +154,10 @@ export default function ProfileScreen() {
         });
 
         setStats({
-          currentStreak: profileData.current_streak || 0,
-          goalsCompleted: completedGoalsCount || 0,
+          goalsCompleted: goalsCompleted,
           longestStreak: profileData.longest_streak || 0,
           completionRate,
-          totalGoals: totalGoalsCount || 0
+          totalGoals: totalGoals
         });
 
       } catch (error) {
@@ -272,22 +276,22 @@ export default function ProfileScreen() {
       <View style={styles.statsContainer}>
         <View style={styles.statRow}>
           <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{stats.currentStreak}</Text>
-            <Text style={styles.statLabel}>Current Streak</Text>
-          </View>
-          <View style={styles.statItem}>
             <Text style={styles.statNumber}>{stats.longestStreak}</Text>
             <Text style={styles.statLabel}>Longest Streak</Text>
-          </View>
-        </View>
-        <View style={styles.statRow}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{stats.goalsCompleted}/{stats.totalGoals}</Text>
-            <Text style={styles.statLabel}>Goals Completed</Text>
           </View>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{stats.completionRate}%</Text>
             <Text style={styles.statLabel}>Completion Rate</Text>
+          </View>
+        </View>
+        <View style={styles.statRow}>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{stats.goalsCompleted}</Text>
+            <Text style={styles.statLabel}>Goals Completed</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Text style={styles.statNumber}>{stats.totalGoals}</Text>
+            <Text style={styles.statLabel}>Total Goals</Text>
           </View>
         </View>
       </View>

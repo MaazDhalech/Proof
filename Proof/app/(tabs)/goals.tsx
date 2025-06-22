@@ -1,7 +1,7 @@
-import { usePushNotifications } from '@/hooks/usePushNotifications';
-import { supabase } from '@/services/supabase';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { usePushNotifications } from "@/hooks/usePushNotifications";
+import { supabase } from "@/services/supabase";
+import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -10,378 +10,298 @@ import {
   Text,
   TouchableOpacity,
   View,
-} from 'react-native';
-import Chatbot from '@/components/Chatbot'; // Adjust path as needed
-
-type CheckinStatus = {
-  date: string;
-  is_missed: boolean;
-  checkin_id?: number;
-};
+} from "react-native";
 
 type Goal = {
-  id: number;
+  id: string;
   name: string;
   description: string;
   start_date: string;
-  target_date: string;
-  goal_type: 'manual' | 'scheduled';
-  checkin_freq: 'daily' | 'weekly' | 'monthly' | null;
-  completed: boolean;
-  weekly_target: number;
-  current_week_start: string;
-  current_week_checkins: CheckinStatus[];
-  successful_checkins: number;
-  missed_checkins: number;
-  total_checkins_this_week: number;
+  end_date: string;
+  frequency: number;
+  current_streak: number;
+  total_checkins: number;
+  last_day: string | null;
+  created_at: string;
 };
 
 export default function GoalsPage() {
   const router = useRouter();
-  const { expoPushToken, notification } = usePushNotifications(); // ✅ Correctly call the hook
+  const { expoPushToken, notification } = usePushNotifications();
 
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'your' | 'friends'>('your');
+  const [tab, setTab] = useState<"your" | "friends">("your");
   const [userId, setUserId] = useState<string | undefined>();
 
   useEffect(() => {
-    // Get current user ID for chatbot
     const getCurrentUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       setUserId(user?.id);
     };
     getCurrentUser();
 
-    if (tab === 'your') fetchGoals();
+    if (tab === "your") fetchGoals();
   }, [tab]);
 
-  const getWeekStart = (date: Date) => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday as first day
-    return new Date(d.setDate(diff));
-  };
+  const fetchGoals = async () => {
+    setLoading(true);
 
-  const getCurrentWeekDates = (weekStart: Date, target: number) => {
-    const dates = [];
-    for (let i = 0; i < target; i++) {
-      const date = new Date(weekStart);
-      date.setDate(weekStart.getDate() + i);
-      dates.push(date.toISOString().split('T')[0]);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const uid = session?.user.id;
+
+    if (!uid) {
+      console.log("No user session found");
+      setLoading(false);
+      return;
     }
-    return dates;
-  };
 
-const fetchGoals = async () => {
-  setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("challenges")
+        .select("*")
+        .eq("user_id", uid)
+        .order("created_at", { ascending: false });
 
-  const { data: { session } } = await supabase.auth.getSession();
-  const uid = session?.user.id;
-  
-  if (!uid) {
-    console.log('No user session found');
+      if (error) {
+        console.error("Error fetching goals:", error);
+        setLoading(false);
+        return;
+      }
+
+      setGoals(data || []);
+    } catch (err) {
+      console.error("Error in fetchGoals:", err);
+    }
+
     setLoading(false);
-    return;
-  }
-
-  console.log('Fetching goals for user:', uid);
-
-  try {
-    // First, update any missed check-ins by calling our database function
-    await supabase.rpc('mark_missed_checkins');
-
-    // Try to fetch from the view first, but with correct column name
-    const { data: viewData, error: viewError } = await supabase
-      .from('current_week_progress')
-      .select('*')
-      .eq('user_id', uid); // Changed from 'challenge_id' to 'user_id'
-
-    console.log('View query result:', { viewData, viewError });
-
-    if (viewError || !viewData) {
-      console.log('View failed, falling back to manual query');
-      
-      // Fallback to manual query
-      const { data: goalsData, error: goalsError } = await supabase
-        .from('challenges')
-        .select(`
-          id,
-          name,
-          description,
-          start_date,
-          target_date,
-          goal_type,
-          checkin_freq,
-          completed,
-          weekly_target,
-          current_week_start
-        `)
-        .eq('user_id', uid)
-        .eq('completed', false);
-
-      console.log('Manual query result:', { goalsData, goalsError });
-
-      if (goalsError) {
-        console.error('Error fetching goals:', goalsError);
-        setLoading(false);
-        return;
-      }
-
-      if (!goalsData || goalsData.length === 0) {
-        console.log('No goals found for user');
-        setGoals([]);
-        setLoading(false);
-        return;
-      }
-
-      // Get current week start
-      const currentWeekStart = getWeekStart(new Date());
-      console.log('Current week start:', currentWeekStart);
-      
-      // Fetch check-ins for current week for each goal
-      const goalsWithProgress = await Promise.all(
-        goalsData.map(async (goal) => {
-          console.log('Processing goal:', goal.name);
-          
-          const { data: checkins, error: checkinsError } = await supabase
-            .from('challenge_checkins')
-            .select('id, checkin_time, is_missed')
-            .eq('challenge_id', goal.id)
-            .gte('checkin_time', currentWeekStart.toISOString())
-            .lt('checkin_time', new Date(currentWeekStart.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString())
-            .order('checkin_time');
-
-          console.log(`Checkins for goal ${goal.name}:`, { checkins, checkinsError });
-
-          if (checkinsError) {
-            console.error('Error fetching check-ins:', checkinsError);
-          }
-
-          const currentWeekCheckins = (checkins || []).map(checkin => ({
-            date: checkin.checkin_time.split('T')[0],
-            is_missed: checkin.is_missed || false,
-            checkin_id: checkin.id
-          }));
-
-          const processedGoal = {
-            ...goal,
-            current_week_start: currentWeekStart.toISOString().split('T')[0],
-            current_week_checkins: currentWeekCheckins,
-            successful_checkins: currentWeekCheckins.filter(c => !c.is_missed).length,
-            missed_checkins: currentWeekCheckins.filter(c => c.is_missed).length,
-            total_checkins_this_week: currentWeekCheckins.length,
-            weekly_target: goal.weekly_target || (goal.checkin_freq === 'daily' ? 7 : 1),
-            description: goal.description || 'No description provided'
-          };
-
-          console.log('Processed goal:', processedGoal);
-          return processedGoal;
-        })
-      );
-
-      console.log('Final goals with progress:', goalsWithProgress);
-      setGoals(goalsWithProgress);
-    } else {
-      // Process data from the view
-      console.log('Using view data');
-      const formatted = viewData.map((item) => ({
-        id: item.challenge_id || item.id,
-        name: item.name,
-        description: item.description || 'No description provided',
-        start_date: item.start_date || '',
-        target_date: item.target_date || '',
-        goal_type: item.goal_type,
-        checkin_freq: item.checkin_freq,
-        completed: false,
-        weekly_target: item.weekly_target,
-        current_week_start: item.current_week_start,
-        current_week_checkins: item.week_checkins || [],
-        successful_checkins: item.successful_checkins_this_week,
-        missed_checkins: item.missed_checkins_this_week,
-        total_checkins_this_week: item.total_checkins_this_week,
-      }));
-      
-      console.log('Formatted view data:', formatted);
-      setGoals(formatted || []);
-    }
-  } catch (err) {
-    console.error('Error in fetchGoals:', err);
-  }
-
-  setLoading(false);
-};
-
-  const getCircleStatus = (goal: Goal, index: number) => {
-    const weekStart = new Date(goal.current_week_start);
-    const targetDate = new Date(weekStart);
-    targetDate.setDate(weekStart.getDate() + index);
-    const targetDateStr = targetDate.toISOString().split('T')[0];
-    
-    const checkin = goal.current_week_checkins.find(c => c.date === targetDateStr);
-    
-    if (checkin) {
-      return checkin.is_missed ? 'missed' : 'completed';
-    }
-    
-    // Check if this date is in the future
-    const today = new Date().toISOString().split('T')[0];
-    if (targetDateStr > today) {
-      return 'future';
-    }
-    
-    // If it's today or past and no checkin exists, it's pending/missed
-    return 'pending';
   };
 
-  const renderCircle = (status: string, index: number) => {
-    let backgroundColor = '#e9ecef';
-    let borderColor = '#dee2e6';
-    let content = '';
-    let textColor = '#666';
+  const calculateProgress = (goal: Goal) => {
+    const startDate = new Date(goal.start_date);
+    const endDate = new Date(goal.end_date);
+    const today = new Date();
 
-    switch (status) {
-      case 'completed':
-        backgroundColor = '#4CAF50';
-        borderColor = '#4CAF50';
-        content = '✓';
-        textColor = '#fff';
-        break;
-      case 'missed':
-        backgroundColor = '#F44336';
-        borderColor = '#F44336';
-        content = '✗';
-        textColor = '#fff';
-        break;
-      case 'pending':
-        backgroundColor = '#FFC107';
-        borderColor = '#FFC107';
-        content = '!';
-        textColor = '#fff';
-        break;
-      case 'future':
-        backgroundColor = '#e9ecef';
-        borderColor = '#dee2e6';
-        content = '';
-        textColor = '#666';
-        break;
+    // Calculate total days in the challenge
+    const totalDays = Math.ceil(
+      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    // Use total_checkins as actual days completed (checked in)
+    const daysCompleted = goal.total_checkins || 0;
+
+    // Calculate progress percentage based on actual check-ins
+    const progressPercentage = Math.min(100, (daysCompleted / totalDays) * 100);
+
+    // Check if challenge period has ended
+    const isComplete = today > endDate;
+
+    return {
+      daysCompleted,
+      totalDays,
+      progressPercentage,
+      isComplete,
+    };
+  };
+
+  const getCheckInStatus = (goal: Goal) => {
+    if (!goal.last_day) {
+      return {
+        canCheckIn: true,
+        status: "available",
+        message: "Check In",
+        shouldResetStreak: false,
+      };
     }
+
+    // Get current local date in YYYY-MM-DD format
+    const getLocalDate = () => {
+      const date = new Date();
+      const offset = date.getTimezoneOffset() * 60000;
+      const localDate = new Date(date.getTime() - offset);
+      return localDate.toISOString().split("T")[0];
+    };
+
+    const today = getLocalDate();
+    const lastCheckIn = goal.last_day.split("T")[0];
+
+    if (today === lastCheckIn) {
+      return {
+        canCheckIn: false,
+        status: "locked",
+        message: "Locked",
+        shouldResetStreak: false,
+      };
+    }
+
+    const todayDate = new Date(today);
+    const lastCheckInDate = new Date(lastCheckIn);
+    const daysDifference = Math.floor(
+      (todayDate.getTime() - lastCheckInDate.getTime()) / (1000 * 60 * 60 * 24)
+    );
+
+    if (daysDifference === 1) {
+      return {
+        canCheckIn: true,
+        status: "available",
+        message: "Check In",
+        shouldResetStreak: false,
+      };
+    } else if (daysDifference > 1) {
+      return {
+        canCheckIn: true,
+        status: "streak-reset",
+        message: "Check In (Reset Streak)",
+        shouldResetStreak: true, // <-- Will reset to 0
+      };
+    }
+
+    return {
+      canCheckIn: false,
+      status: "locked",
+      message: "Locked",
+      shouldResetStreak: false,
+    };
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const renderGoal = ({ item }: { item: Goal }) => {
+    const progress = calculateProgress(item);
+    const checkInStatus = getCheckInStatus(item);
 
     return (
-      <View
-        key={index}
-        style={[
-          styles.circle,
-          { backgroundColor, borderColor }
-        ]}
-      >
-        <Text style={[styles.circleText, { color: textColor }]}>
-          {content}
-        </Text>
+      <View style={styles.goalCard}>
+        <View style={styles.goalHeader}>
+          <View style={styles.goalInfo}>
+            <Text style={styles.goalTitle}>{item.name}</Text>
+            <Text style={styles.goalDescription}>
+              {item.description || "No description provided"}
+            </Text>
+            <Text style={styles.goalFrequency}>
+              Frequency: {item.frequency} times per period
+            </Text>
+          </View>
+          {progress.isComplete && (
+            <View style={styles.completedBadge}>
+              <Text style={styles.completedText}>✓</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.dateSection}>
+          <View style={styles.dateRow}>
+            <Text style={styles.dateLabel}>Start:</Text>
+            <Text style={styles.dateValue}>{formatDate(item.start_date)}</Text>
+          </View>
+          <View style={styles.dateRow}>
+            <Text style={styles.dateLabel}>End:</Text>
+            <Text style={styles.dateValue}>{formatDate(item.end_date)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.progressSection}>
+          <View style={styles.progressHeader}>
+            <Text style={styles.progressLabel}>Progress</Text>
+            <Text style={styles.progressStats}>
+              {progress.daysCompleted}/{progress.totalDays} days (
+              {Math.round(progress.progressPercentage)}%)
+            </Text>
+          </View>
+
+          <View style={styles.progressBarContainer}>
+            <View
+              style={[
+                styles.progressBar,
+                {
+                  width: `${progress.progressPercentage}%`,
+                  backgroundColor: progress.isComplete ? "#4CAF50" : "#007aff",
+                },
+              ]}
+            />
+          </View>
+        </View>
+
+        <View style={styles.streakSection}>
+          <Text style={styles.streakText}>
+            Current streak: {item.current_streak} days
+          </Text>
+          {item.last_day && (
+            <Text style={styles.lastDayText}>
+              Last check-in: {formatDate(item.last_day)}
+            </Text>
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.checkInButton,
+            (!checkInStatus.canCheckIn || progress.isComplete) &&
+              styles.disabledButton,
+            checkInStatus.status === "streak-reset" && styles.warningButton,
+          ]}
+          onPress={() => {
+            if (checkInStatus.canCheckIn && !progress.isComplete) {
+              router.push({
+                pathname: `/goals/${item.id}/check-in`,
+                params: {
+                  challengeName: item.name,
+                  challengeDescription: item.description,
+                  id: item.id,
+                  streakReset: checkInStatus.shouldResetStreak
+                    ? "true"
+                    : "false",
+                },
+              });
+            }
+          }}
+          disabled={!checkInStatus.canCheckIn || progress.isComplete}
+        >
+          <Text
+            style={[
+              styles.checkInText,
+              (!checkInStatus.canCheckIn || progress.isComplete) &&
+                styles.disabledButtonText,
+            ]}
+          >
+            {progress.isComplete ? "Goal Completed" : checkInStatus.message}
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   };
-
-  const formatFrequency = (type: string, freq: string | null) => {
-    if (type === 'manual') return 'Manual Check-ins';
-    if (!freq) return 'Scheduled';
-    return `${freq.charAt(0).toUpperCase() + freq.slice(1)} Check-ins`;
-  };
-
-  const getWeeklyDisplayText = (goal: Goal) => {
-    if (goal.checkin_freq === 'monthly') {
-      return `${goal.successful_checkins}/1 this month`;
-    } else if (goal.checkin_freq === 'weekly') {
-      return `${goal.successful_checkins}/1 this week`;
-    } else {
-      return `${goal.successful_checkins}/${goal.weekly_target} this week`;
-    }
-  };
-
-  const renderGoal = ({ item }: { item: Goal }) => (
-    <View style={styles.goalCard}>
-      <View style={styles.goalHeader}>
-        <View style={styles.goalInfo}>
-          <Text style={styles.goalTitle}>{item.name}</Text>
-          <Text style={styles.goalDescription}>{item.description}</Text>
-          <Text style={styles.goalFrequency}>
-            {formatFrequency(item.goal_type, item.checkin_freq)}
-          </Text>
-        </View>
-        {item.completed && (
-          <View style={styles.completedBadge}>
-            <Text style={styles.completedText}>✓</Text>
-          </View>
-        )}
-      </View>
-
-      {/* Progress Section with Circles */}
-      <View style={styles.progressSection}>
-        <View style={styles.progressHeader}>
-          <Text style={styles.progressLabel}>This Week's Progress</Text>
-          <Text style={styles.progressStats}>
-            {getWeeklyDisplayText(item)}
-          </Text>
-        </View>
-        
-        <View style={styles.circlesContainer}>
-          {Array.from({ length: item.weekly_target }, (_, index) => {
-            const status = getCircleStatus(item, index);
-            return renderCircle(status, index);
-          })}
-        </View>
-
-        {/* Legend */}
-        <View style={styles.legendContainer}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendCircle, { backgroundColor: '#4CAF50' }]} />
-            <Text style={styles.legendText}>Done</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendCircle, { backgroundColor: '#F44336' }]} />
-            <Text style={styles.legendText}>Missed</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendCircle, { backgroundColor: '#FFC107' }]} />
-            <Text style={styles.legendText}>Pending</Text>
-          </View>
-        </View>
-      </View>
-
-      <TouchableOpacity
-        style={styles.checkInButton}
-        onPress={() => router.push({
-          pathname: `/goals/${item.id}/check-in`,
-          params: {
-            challengeName: item.name, // Fixed: was item.title
-            challengeDescription: item.description,
-            id: item.id
-          }
-        })}
-      >
-        <Text style={[styles.checkInText, item.completed && styles.completedButtonText]}>
-          {item.completed ? 'Goal Completed' : 'Check In'}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.tabContainer}>
         <TouchableOpacity
-          style={[styles.tab, tab === 'your' && styles.activeTab]}
-          onPress={() => setTab('your')}
+          style={[styles.tab, tab === "your" && styles.activeTab]}
+          onPress={() => setTab("your")}
         >
-          <Text style={[styles.tabText, tab === 'your' && styles.activeTabText]}>
+          <Text
+            style={[styles.tabText, tab === "your" && styles.activeTabText]}
+          >
             Your Goals
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, tab === 'friends' && styles.activeTab]}
-          onPress={() => setTab('friends')}
+          style={[styles.tab, tab === "friends" && styles.activeTab]}
+          onPress={() => setTab("friends")}
         >
-          <Text style={[styles.tabText, tab === 'friends' && styles.activeTabText]}>
+          <Text
+            style={[styles.tabText, tab === "friends" && styles.activeTabText]}
+          >
             Friends' Goals
           </Text>
         </TouchableOpacity>
@@ -392,67 +312,68 @@ const fetchGoals = async () => {
           <ActivityIndicator size="large" color="#007aff" />
           <Text style={styles.loadingText}>Loading your goals...</Text>
         </View>
-      ) : tab === 'your' ? (
+      ) : tab === "your" ? (
         <FlatList
           data={goals}
-          keyExtractor={(item) => item.id.toString()}
+          keyExtractor={(item) => item.id}
           renderItem={renderGoal}
           contentContainerStyle={styles.goalList}
           showsVerticalScrollIndicator={false}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyTitle}>No goals yet!</Text>
-              <Text style={styles.emptySubtitle}>Create your first goal to get started</Text>
+              <Text style={styles.emptySubtitle}>
+                Create your first goal to get started
+              </Text>
             </View>
           }
         />
       ) : (
         <View style={styles.placeholder}>
-          <Text style={styles.placeholderText}>Friends' goals view coming soon.</Text>
+          <Text style={styles.placeholderText}>
+            Friends' goals view coming soon.
+          </Text>
         </View>
       )}
 
-      {tab === 'your' && (
+      {tab === "your" && (
         <TouchableOpacity
           style={styles.createButton}
-          onPress={() => router.push('/goals/create')}
+          onPress={() => router.push("/goals/create")}
         >
           <Text style={styles.createButtonText}>+ Create New Goal</Text>
         </TouchableOpacity>
       )}
-
-      {/* Integrated Chatbot */}
-      <Chatbot userId={userId} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#f8f9fa', 
-    paddingHorizontal: 20 
+  container: {
+    flex: 1,
+    backgroundColor: "#f8f9fa",
+    paddingHorizontal: 20,
   },
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#666',
+    color: "#666",
   },
-  goalList: { 
+  goalList: {
     paddingBottom: 100,
     paddingTop: 12,
   },
   goalCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: "#ffffff",
     padding: 20,
     borderRadius: 16,
     marginVertical: 8,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: {
       width: 0,
       height: 2,
@@ -461,108 +382,108 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
     borderWidth: 1,
-    borderColor: '#f0f0f0',
+    borderColor: "#f0f0f0",
   },
   goalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     marginBottom: 16,
   },
   goalInfo: {
     flex: 1,
   },
-  goalTitle: { 
-    fontSize: 20, 
-    fontWeight: '700', 
-    color: '#1a1a1a',
+  goalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1a1a1a",
     marginBottom: 6,
   },
-  goalDescription: { 
-    fontSize: 15, 
-    color: '#666', 
+  goalDescription: {
+    fontSize: 15,
+    color: "#666",
     lineHeight: 20,
     marginBottom: 4,
   },
   goalFrequency: {
     fontSize: 13,
-    color: '#999',
-    fontWeight: '500',
+    color: "#999",
+    fontWeight: "500",
   },
   completedBadge: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: "#4CAF50",
     width: 32,
     height: 32,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   completedText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
+  },
+  dateSection: {
+    marginBottom: 12,
+  },
+  dateRow: {
+    flexDirection: "row",
+    marginBottom: 4,
+  },
+  dateLabel: {
+    fontWeight: "600",
+    color: "#555",
+    width: 60,
+  },
+  dateValue: {
+    color: "#333",
   },
   progressSection: {
     marginBottom: 16,
   },
   progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
   },
   progressLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontWeight: "600",
+    color: "#333",
   },
   progressStats: {
     fontSize: 13,
-    color: '#666',
+    color: "#666",
   },
-  circlesContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  progressBarContainer: {
+    height: 8,
+    backgroundColor: "#e9ecef",
+    borderRadius: 4,
+    overflow: "hidden",
   },
-  circle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 2,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginHorizontal: 2,
+  progressBar: {
+    height: "100%",
+    borderRadius: 4,
   },
-  circleText: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  streakSection: {
+    marginBottom: 16,
   },
-  legendContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
+  streakText: {
+    fontSize: 14,
+    color: "#555",
+    marginBottom: 4,
   },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  legendCircle: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  legendText: {
-    fontSize: 11,
-    color: '#666',
+  lastDayText: {
+    fontSize: 13,
+    color: "#777",
   },
   checkInButton: {
-    backgroundColor: '#007aff',
+    backgroundColor: "#007aff",
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: 'center',
-    shadowColor: '#007aff',
+    alignItems: "center",
+    shadowColor: "#007aff",
     shadowOffset: {
       width: 0,
       height: 2,
@@ -571,29 +492,35 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
-  completedButton: {
-    backgroundColor: '#e9ecef',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  checkInText: { 
-    color: '#fff', 
-    fontWeight: '600',
+  checkInText: {
+    color: "#fff",
+    fontWeight: "600",
     fontSize: 16,
   },
   completedButtonText: {
-    color: '#666',
+    color: "#666",
+  },
+  disabledButton: {
+    backgroundColor: "#ccc",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  disabledButtonText: {
+    color: "#888",
+  },
+  warningButton: {
+    backgroundColor: "#ff9500",
   },
   createButton: {
-    backgroundColor: '#007aff',
+    backgroundColor: "#007aff",
     padding: 18,
     borderRadius: 12,
-    position: 'absolute',
+    position: "absolute",
     bottom: 30,
     left: 20,
     right: 20,
-    alignItems: 'center',
-    shadowColor: '#007aff',
+    alignItems: "center",
+    shadowColor: "#007aff",
     shadowOffset: {
       width: 0,
       height: 4,
@@ -602,17 +529,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  createButtonText: { 
-    color: '#fff', 
-    fontSize: 16, 
-    fontWeight: 'bold' 
+  createButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "bold",
   },
   tabContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
     marginVertical: 12,
     paddingTop: 10,
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 12,
     marginHorizontal: -20,
     marginTop: 0,
@@ -622,44 +549,44 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 3,
-    borderColor: 'transparent',
+    borderColor: "transparent",
   },
   activeTab: {
-    borderColor: '#007aff',
+    borderColor: "#007aff",
   },
   tabText: {
     fontSize: 16,
-    color: '#666',
-    fontWeight: '500',
+    color: "#666",
+    fontWeight: "500",
   },
   activeTabText: {
-    color: '#007aff',
-    fontWeight: '700',
+    color: "#007aff",
+    fontWeight: "700",
   },
   placeholder: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   placeholderText: {
     fontSize: 16,
-    color: '#888',
+    color: "#888",
   },
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingVertical: 60,
   },
   emptyTitle: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: "bold",
+    color: "#333",
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
+    color: "#666",
+    textAlign: "center",
   },
 });

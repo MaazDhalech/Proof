@@ -214,55 +214,132 @@ const takePhoto = async () => {
     takePhoto();
   };
 
-  const submitToSupabase = async () => {
-    if (!imageBase64 || !lettaResponse || !caption.trim()) {
-      Alert.alert('Error', 'Please add a caption before submitting.');
+const submitToSupabase = async () => {
+  if (!imageBase64 || !lettaResponse || !caption.trim()) {
+    Alert.alert('Error', 'Please add a caption before submitting.');
+    return;
+  }
+
+  try {
+    setIsSubmitting(true);
+
+    // Get current user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      Alert.alert('Error', 'You must be logged in to submit a photo.');
       return;
     }
 
-    try {
-      setIsSubmitting(true);
+    // Get local date in YYYY-MM-DD format
+    const getLocalDate = () => {
+      const date = new Date();
+      const offset = date.getTimezoneOffset() * 60000;
+      const localDate = new Date(date.getTime() - offset);
+      return localDate.toISOString().split('T')[0];
+    };
 
-      // Get current user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        Alert.alert('Error', 'You must be logged in to submit a photo.');
-        return;
-      }
+    const localDateString = getLocalDate();
 
-      // Insert into Supabase
-      const { error } = await supabase
-        .from('proof')
-        .insert({
-          // id will be auto-generated
-          challenge_id: challengeId, // Set this based on your app logic
-          user_id: user.id,
-          picture_url: imageBase64, // Store as base64 data URL
-          caption: caption.trim(),
-          likes: 0,
-          reactions: {},
-          created_at: new Date().toISOString(),
-          verified: true,
-          missed_window: false
-        });
+    // 1. First get current challenge data
+    const { data: challenge, error: fetchError } = await supabase
+      .from('challenges')
+      .select('current_streak, total_checkins, last_day, user_id, frequency')
+      .eq('id', challengeId)
+      .single();
 
-      if (error) {
-        throw error;
-      }
+    if (fetchError) throw fetchError;
 
-      Alert.alert(
-        'Success!', 
-        'Your photo has been submitted successfully.',
-        [{ text: 'OK', onPress: () => router.push('/') }]
-      );
+    // Check if we need to reset streak (from params)
+    const shouldResetStreak = params.streakReset === 'true';
+    const currentStreak = shouldResetStreak ? 1 : (challenge?.current_streak || 0) + 1;
+    const newTotalCheckins = (challenge?.total_checkins || 0) + 1;
 
-    } catch (error) {
-      console.error('Error submitting to Supabase:', error);
-      Alert.alert('Error', 'Failed to submit your photo. Please try again.');
-    } finally {
-      setIsSubmitting(false);
+    // 2. Get user's profile to check longest_streak and goals_completed
+    const { data: profile, error: profileError } = await supabase
+      .from('profile')
+      .select('longest_streak, goals_completed')
+      .eq('id', user.id)
+      .single();
+
+    if (profileError) throw profileError;
+
+    // 3. Update challenge record
+    const { error: updateError } = await supabase
+      .from('challenges')
+      .update({
+        last_day: localDateString,
+        current_streak: currentStreak,
+        total_checkins: newTotalCheckins
+      })
+      .eq('id', challengeId);
+
+    if (updateError) throw updateError;
+
+    // 4. Check if goal is completed (total_checkins equals frequency)
+    const isGoalCompleted = newTotalCheckins === challenge?.frequency;
+    
+    // 5. Update profile's longest_streak and goals_completed if needed
+    const profileUpdates: any = {};
+    
+    if (currentStreak >= (profile?.longest_streak || 0)) {
+      profileUpdates.longest_streak = currentStreak;
     }
-  };
+    
+    if (isGoalCompleted) {
+      profileUpdates.goals_completed = (profile?.goals_completed || 0) + 1;
+    }
+    
+    // Only update profile if there are changes
+    if (Object.keys(profileUpdates).length > 0) {
+      const { error: profileUpdateError } = await supabase
+        .from('profile')
+        .update(profileUpdates)
+        .eq('id', user.id);
+
+      if (profileUpdateError) throw profileUpdateError;
+    }
+
+    // 6. Create the proof record
+    const { error: insertError } = await supabase
+      .from('proof')
+      .insert({
+        challenge_id: challengeId,
+        user_id: user.id,
+        picture_url: imageBase64,
+        caption: caption.trim(),
+        likes: 0,
+        reactions: {},
+        created_at: new Date().toISOString(),
+        verified: true,
+        missed_window: false
+      });
+
+    if (insertError) throw insertError;
+
+    // Create success message
+    let successMessage = 'Your photo has been submitted successfully. ';
+    if (shouldResetStreak) {
+      successMessage += '(Streak reset to 1)';
+    } else if (currentStreak > (profile?.longest_streak || 0)) {
+      successMessage += `(New longest streak: ${currentStreak})`;
+    }
+    if (isGoalCompleted) {
+      successMessage += ' 🎉 Goal completed!';
+    }
+
+    Alert.alert(
+      'Success!', 
+      successMessage,
+      [{ text: 'OK', onPress: () => router.push('/') }]
+    );
+
+  } catch (error) {
+    console.error('Error submitting to Supabase:', error);
+    Alert.alert('Error', 'Failed to submit your photo. Please try again.');
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   if (hasPermission === null) {
     return (
