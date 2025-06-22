@@ -1,11 +1,12 @@
 import { supabase } from '@/services/supabase';
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
-  SafeAreaView,
+  RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -21,6 +22,8 @@ interface Post {
   likes: number;
   profile: {
     username: string;
+    first_name: string | null;
+    last_name: string | null;
     profile_picture: string;
   };
   challenges: {
@@ -32,26 +35,38 @@ interface Post {
 export default function HomeFeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set());
+  const router = useRouter();
 
   useEffect(() => {
-    const getCurrentUser = async () => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
-
-      const currentUserId = session?.user?.id ?? null;
-      setUserId(currentUserId);
-
-      if (currentUserId) {
-        fetchFeed(currentUserId);
-      }
-    };
-
-    getCurrentUser();
+    loadUserAndData();
   }, []);
+
+  const loadUserAndData = async () => {
+    setLoading(true);
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error('Error fetching session:', error.message);
+      setLoading(false);
+      return;
+    }
+
+    const currentUserId = session?.user?.id ?? null;
+    setUserId(currentUserId);
+
+    if (currentUserId) {
+      await fetchFeed(currentUserId);
+    } else {
+      console.warn('No authenticated user found.');
+    }
+    setLoading(false);
+  };
 
   const fetchFeed = async (currentUserId: string) => {
     try {
@@ -67,7 +82,6 @@ export default function HomeFeedScreen() {
 
       if (!friendIds.length) {
         setPosts([]);
-        setLoading(false);
         return;
       }
 
@@ -80,11 +94,13 @@ export default function HomeFeedScreen() {
           created_at,
           picture_url,
           likes,
-          profile (
+          profile:user_id (
             username,
+            first_name,
+            last_name,
             profile_picture
           ),
-          challenges (
+          challenges:challenge_id (
             name
           )
         `)
@@ -117,9 +133,15 @@ export default function HomeFeedScreen() {
       setPosts(postsWithLikeStatus);
     } catch (err) {
       console.error('Feed load error:', err);
-    } finally {
-      setLoading(false);
+      Alert.alert('Error', 'Failed to load feed. Please try again.');
     }
+  };
+
+  const onRefresh = async () => {
+    if (!userId) return;
+    setRefreshing(true);
+    await fetchFeed(userId);
+    setRefreshing(false);
   };
 
   const handleLike = async (postId: string, currentLikes: number, userHasLiked: boolean) => {
@@ -189,151 +211,294 @@ export default function HomeFeedScreen() {
     }
   };
 
+  const getInitials = (firstName: string | null, lastName: string | null) => {
+    const first = firstName?.charAt(0) || '';
+    const last = lastName?.charAt(0) || '';
+    return `${first}${last}`.toUpperCase();
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
   const renderPost = ({ item }: { item: Post }) => (
-    <View style={styles.post}>
-      <View style={styles.userRow}>
-        <Image
-          source={{ uri: item.profile?.profile_picture || 'https://placehold.co/48x48' }}
-          style={styles.avatar}
-        />
-        <View style={{ marginLeft: 10 }}>
+    <View style={styles.postCard}>
+      <View style={styles.postHeader}>
+        {item.profile?.profile_picture ? (
+          <Image
+            source={{ uri: item.profile.profile_picture }}
+            style={styles.avatar}
+          />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarText}>
+              {getInitials(item.profile?.first_name, item.profile?.last_name)}
+            </Text>
+          </View>
+        )}
+        
+        <View style={styles.userInfo}>
+          <Text style={styles.userName}>
+            {item.profile?.first_name || ''} {item.profile?.last_name || ''}
+          </Text>
           <Text style={styles.username}>@{item.profile?.username}</Text>
-          <Text style={styles.goal}>{item.challenges?.name}</Text>
         </View>
       </View>
 
-      <Image source={{ uri: `data:image/jpeg;base64,${item.picture_url}` }} style={styles.image} />
-      {item.caption && <Text style={styles.caption}>{item.caption}</Text>}
-      
-      <View style={styles.actionRow}>
+      <View style={styles.challengeBadge}>
+        <Text style={styles.challengeText}>{item.challenges?.name}</Text>
+      </View>
+
+      {item.caption && (
+        <Text style={styles.caption}>{item.caption}</Text>
+      )}
+
+      <Image 
+        source={{ uri: item.picture_url }} 
+        style={styles.postImage} 
+        resizeMode="cover"
+      />
+
+      <View style={styles.postFooter}>
         <TouchableOpacity
-          style={[styles.likeButton, item.userHasLiked && styles.likeButtonActive]}
+          style={styles.likeButton}
           onPress={() => handleLike(item.id, item.likes, item.userHasLiked || false)}
           disabled={likingPosts.has(item.id)}
         >
-          <Text style={[styles.likeButtonText, item.userHasLiked && styles.likeButtonTextActive]}>
-            {likingPosts.has(item.id) ? '...' : item.userHasLiked ? '❤️' : '🤍'} {item.likes || 0}
+          <Text style={[
+            styles.likeButtonText,
+            item.userHasLiked && styles.likeButtonActive
+          ]}>
+            {likingPosts.has(item.id) ? '...' : item.userHasLiked ? '❤️ Liked' : '🤍 Like'} • {item.likes || 0}
           </Text>
         </TouchableOpacity>
-      </View>
 
-      <Text style={styles.timestamp}>
-        {new Date(item.created_at).toLocaleString()}
-      </Text>
+        <Text style={styles.timestamp}>
+          {formatDate(item.created_at)}
+        </Text>
+      </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <Text style={styles.header}>Proofs</Text>
-
-        {loading ? (
-          <ActivityIndicator size="large" color="#007aff" />
-        ) : posts.length ? (
-          <FlatList
-            data={posts}
-            keyExtractor={(item) => item.id.toString()}
-            renderItem={renderPost}
-            contentContainerStyle={styles.feedContainer}
-            showsVerticalScrollIndicator={false}
-          />
-        ) : (
-          <Text style={styles.emptyText}>No posts from your friends yet.</Text>
-        )}
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.heading}>Proofs</Text>
       </View>
-    </SafeAreaView>
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007aff" />
+          <Text style={styles.loadingText}>Loading proofs...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id}
+          renderItem={renderPost}
+          refreshControl={
+            <RefreshControl 
+              refreshing={refreshing} 
+              onRefresh={onRefresh}
+              tintColor="#007aff"
+            />
+          }
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyTitle}>No proofs yet!</Text>
+              <Text style={styles.emptySubtitle}>
+                When your friends post proofs, they'll appear here
+              </Text>
+              <TouchableOpacity
+                style={styles.primaryButton}
+                onPress={() => router.push('/(stack)/goals/friends/explore')}
+              >
+                <Text style={styles.primaryButtonText}>Find Friends</Text>
+              </TouchableOpacity>
+            </View>
+          }
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
   container: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingTop: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  content: {
+    flex: 1,
   },
   header: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#111',
+    padding: 20,
+    paddingBottom: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  heading: {
+    fontSize: 28,
+    fontWeight: '700',
+    marginTop: 70,
     marginBottom: 16,
+    color: '#1a1a1a',
   },
-  feedContainer: {
-    paddingBottom: 100,
+  listContent: {
+    padding: 16,
+    paddingBottom: 32,
   },
-  post: {
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-  },
-  userRow: {
-    flexDirection: 'row',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 8,
   },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#ddd',
-  },
-  username: {
-    fontWeight: 'bold',
+  emptySubtitle: {
     fontSize: 16,
-    color: '#111',
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    maxWidth: 300,
   },
-  goal: {
-    fontSize: 13,
-    color: '#555',
+  postCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
-  image: {
-    width: '100%',
-    height: 240,
-    borderRadius: 10,
-    marginTop: 10,
-  },
-  caption: {
-    fontSize: 14,
-    marginTop: 8,
-    color: '#333',
-  },
-  actionRow: {
+  postHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    marginBottom: 4,
+    marginBottom: 12,
   },
-  likeButton: {
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  avatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#3b82f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+    marginBottom: 2,
+  },
+  username: {
+    fontSize: 14,
+    color: '#666',
+  },
+  challengeBadge: {
+    backgroundColor: '#dbeafe',
+    alignSelf: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: '#e8e8e8',
+    borderRadius: 12,
+    marginBottom: 12,
   },
-  likeButtonActive: {
-    backgroundColor: '#ffe8e8',
+  challengeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1d4ed8',
+  },
+  caption: {
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 12,
+    lineHeight: 22,
+  },
+  postImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  postFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  likeButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
   },
   likeButtonText: {
     fontSize: 14,
+    fontWeight: '600',
     color: '#666',
-    fontWeight: '500',
   },
-  likeButtonTextActive: {
+  likeButtonActive: {
     color: '#e91e63',
   },
   timestamp: {
     fontSize: 12,
     color: '#888',
-    marginTop: 4,
   },
-  emptyText: {
-    textAlign: 'center',
-    marginTop: 50,
-    color: '#666',
+  primaryButton: {
+    backgroundColor: '#007aff',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#007aff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+    width: '100%',
+    maxWidth: 200,
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontWeight: '600',
     fontSize: 16,
   },
 });
