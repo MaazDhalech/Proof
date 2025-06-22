@@ -266,7 +266,7 @@ export default function FriendsScreen() {
           
           <View style={styles.statItem}>
             <Text style={styles.statLabel}>Frequency</Text>
-            <Text style={styles.statValue}>{challenge.frequency}x/week</Text>
+            <Text style={styles.statValue}>{challenge.frequency}x</Text>
           </View>
         </View>
 
