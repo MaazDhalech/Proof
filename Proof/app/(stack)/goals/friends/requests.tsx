@@ -14,7 +14,19 @@ type UserRequest = {
   id: string;
   name: string;
   username: string;
-  requestId: number; // primary key in friendships table
+  requestId: number;
+};
+
+type Profile = {
+  first_name: string;
+  last_name: string;
+  username: string;
+};
+
+type FriendshipRecord = {
+  id: number;
+  user_id: string;
+  profile: Profile | Profile[] | null;
 };
 
 export default function FriendRequestsScreen() {
@@ -41,7 +53,15 @@ export default function FriendRequestsScreen() {
     setLoading(true);
     const { data, error } = await supabase
       .from('friendships')
-      .select('id, user_id, profile: user_id (first_name, last_name, username)')
+      .select(`
+        id,
+        user_id,
+        profile: user_id (
+          first_name,
+          last_name,
+          username
+        )
+      `)
       .eq('friend_id', uid)
       .eq('status', 'pending');
 
@@ -50,12 +70,22 @@ export default function FriendRequestsScreen() {
       return;
     }
 
-    const formatted: UserRequest[] = data.map((req) => ({
-      id: req.user_id,
-      name: `${req.profile?.first_name ?? ''} ${req.profile?.last_name ?? ''}`.trim(),
-      username: req.profile?.username ?? '',
-      requestId: req.id,
-    }));
+    const formatted: UserRequest[] = (data as FriendshipRecord[]).map((req) => {
+      let profile: Profile | null = null;
+
+      if (Array.isArray(req.profile)) {
+        profile = req.profile[0] ?? null;
+      } else if (req.profile) {
+        profile = req.profile;
+      }
+
+      return {
+        id: req.user_id,
+        name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+        username: profile?.username ?? '',
+        requestId: req.id,
+      };
+    });
 
     setRequests(formatted);
     setLoading(false);
@@ -63,15 +93,9 @@ export default function FriendRequestsScreen() {
 
   const handleResponse = async (requestId: number, accept: boolean) => {
     if (accept) {
-      await supabase
-        .from('friendships')
-        .update({ status: 'accepted' })
-        .eq('id', requestId);
+      await supabase.from('friendships').update({ status: 'accepted' }).eq('id', requestId);
     } else {
-      await supabase
-        .from('friendships')
-        .delete()
-        .eq('id', requestId);
+      await supabase.from('friendships').delete().eq('id', requestId);
     }
 
     setRequests((prev) => prev.filter((r) => r.requestId !== requestId));

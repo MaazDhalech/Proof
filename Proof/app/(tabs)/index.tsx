@@ -56,7 +56,6 @@ export default function HomeFeedScreen() {
         .select(`
           id,
           user_id,
-          picture,
           caption,
           created_at,
           profile (

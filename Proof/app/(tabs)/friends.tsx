@@ -17,7 +17,9 @@ type Friend = {
   id: string;
   name: string;
   username: string;
+  friendshipId: string;
 };
+
 
 export default function FriendsScreen() {
   const [searchText, setSearchText] = useState('');
@@ -54,21 +56,46 @@ export default function FriendsScreen() {
   const fetchFriends = async (userId: string) => {
     const { data, error } = await supabase
       .from('friendships')
-      .select('friend_id, profile:friend_id (username, first_name, last_name)')
-      .eq('user_id', userId)
+      .select(`
+        id,
+        user_id,
+        friend_id,
+        sender:profile!friendships_user_id_fkey (
+          id,
+          username,
+          first_name,
+          last_name
+        ),
+        receiver:profile!friendships_friend_id_fkey (
+          id,
+          username,
+          first_name,
+          last_name
+        )
+      `)
+      .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
       .eq('status', 'accepted');
-
+  
     if (error) {
       console.error('Error fetching friends:', error);
-    } else if (data) {
-      const formatted: Friend[] = data.map((item: any) => ({
-        id: item.friend_id,
-        name: `${item.profile?.first_name ?? ''} ${item.profile?.last_name ?? ''}`.trim(),
-        username: item.profile?.username ?? '',
-      }));
-      setFriends(formatted);
+      return;
     }
+  
+    const formatted: Friend[] = data.map((item: any) => {
+      const isUserSender = item.user_id === userId;
+      const profile = isUserSender ? item.receiver : item.sender;
+  
+      return {
+        id: profile.id,
+        name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+        username: profile?.username ?? '',
+        friendshipId: item.id,
+      };
+    });
+  
+    setFriends(formatted);
   };
+  
 
   const handleUnfriend = async (friendId: string) => {
     if (!userId) return;
@@ -131,7 +158,7 @@ export default function FriendsScreen() {
           </>
         }
         data={filteredFriends}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item.friendshipId}
         renderItem={renderFriend}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
