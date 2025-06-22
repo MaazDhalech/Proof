@@ -5,6 +5,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -22,32 +23,33 @@ export default function FriendsScreen() {
   const [searchText, setSearchText] = useState('');
   const [friends, setFriends] = useState<Friend[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    const loadUserAndData = async () => {
-      const {
-        data: { session },
-        error,
-      } = await supabase.auth.getSession();
-
-      if (error) {
-        console.error('Error fetching session:', error.message);
-        return;
-      }
-
-      const currentUserId = session?.user?.id ?? null;
-      setUserId(currentUserId);
-
-      if (currentUserId) {
-        await fetchFriends(currentUserId);
-      } else {
-        console.warn('No authenticated user found.');
-      }
-    };
-
     loadUserAndData();
   }, []);
+
+  const loadUserAndData = async () => {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
+
+    if (error) {
+      console.error('Error fetching session:', error.message);
+      return;
+    }
+
+    const currentUserId = session?.user?.id ?? null;
+    setUserId(currentUserId);
+
+    if (currentUserId) {
+      await fetchFriends(currentUserId);
+    } else {
+      console.warn('No authenticated user found.');
+    }
+  };
 
   const fetchFriends = async (userId: string) => {
     const { data, error } = await supabase
@@ -68,6 +70,31 @@ export default function FriendsScreen() {
     }
   };
 
+  const handleUnfriend = async (friendId: string) => {
+    if (!userId) return;
+
+    const { error } = await supabase
+      .from('friendships')
+      .delete()
+      .or(
+        `and(user_id.eq.${userId},friend_id.eq.${friendId}),and(user_id.eq.${friendId},friend_id.eq.${userId})`
+      );
+
+    if (error) {
+      console.error('Error unfriending:', error);
+    } else {
+      setFriends((prev) => prev.filter((f) => f.id !== friendId));
+    }
+  };
+
+  const onRefresh = async () => {
+    if (userId) {
+      setRefreshing(true);
+      await fetchFriends(userId);
+      setRefreshing(false);
+    }
+  };
+
   const filteredFriends = friends.filter((friend) =>
     friend.name.toLowerCase().includes(searchText.toLowerCase()) ||
     friend.username.toLowerCase().includes(searchText.toLowerCase())
@@ -77,7 +104,10 @@ export default function FriendsScreen() {
     <View style={styles.friendCard}>
       <Text style={styles.friendName}>{item.name}</Text>
       <Text style={styles.friendUsername}>@{item.username}</Text>
-      <TouchableOpacity style={styles.unfriendButton}>
+      <TouchableOpacity
+        style={styles.unfriendButton}
+        onPress={() => handleUnfriend(item.id)}
+      >
         <Text style={styles.unfriendText}>Unfriend</Text>
       </TouchableOpacity>
     </View>
@@ -88,23 +118,27 @@ export default function FriendsScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <Text style={styles.heading}>Your Friends</Text>
-
-      <TextInput
-        style={styles.searchInput}
-        placeholder="Search friends..."
-        value={searchText}
-        onChangeText={setSearchText}
-      />
-
       <FlatList
+        ListHeaderComponent={
+          <>
+            <Text style={styles.heading}>Your Friends</Text>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search friends..."
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+          </>
+        }
         data={filteredFriends}
         keyExtractor={(item) => item.id}
         renderItem={renderFriend}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
         contentContainerStyle={{ paddingBottom: 100 }}
       />
 
-      {/* Buttons */}
       <View style={styles.buttonGroup}>
         <TouchableOpacity
           style={styles.secondaryButton}

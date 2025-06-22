@@ -1,6 +1,14 @@
 import { supabase } from '@/services/supabase';
 import { useEffect, useState } from 'react';
-import { FlatList, Image, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native';
 
 export default function HomeFeedScreen() {
   const [posts, setPosts] = useState<any[]>([]);
@@ -27,7 +35,6 @@ export default function HomeFeedScreen() {
 
   const fetchFeed = async (currentUserId: string) => {
     try {
-      // ✅ Corrected: Get list of friend_ids from 'friendships' table
       const { data: friendData, error: friendError } = await supabase
         .from('friendships')
         .select('friend_id')
@@ -44,7 +51,6 @@ export default function HomeFeedScreen() {
         return;
       }
 
-      // ✅ Get recent posts from friends
       const { data: postData, error: postError } = await supabase
         .from('proof')
         .select(`
@@ -55,7 +61,7 @@ export default function HomeFeedScreen() {
           created_at,
           profile (
             username,
-            profile
+            profile_picture
           ),
           challenges (
             name
@@ -76,9 +82,18 @@ export default function HomeFeedScreen() {
 
   const renderPost = ({ item }: { item: any }) => (
     <View style={styles.post}>
+      <View style={styles.userRow}>
+        <Image
+          source={{ uri: item.profile?.profile_picture || 'https://placehold.co/48x48' }}
+          style={styles.avatar}
+        />
+        <View style={{ marginLeft: 10 }}>
+          <Text style={styles.username}>@{item.profile?.username}</Text>
+          <Text style={styles.goal}>{item.challenges?.name}</Text>
+        </View>
+      </View>
+
       <Image source={{ uri: item.picture }} style={styles.image} />
-      <Text style={styles.username}>{item.profile?.username}</Text>
-      <Text style={styles.goal}>Goal: {item.challenges?.name}</Text>
       {item.caption && <Text style={styles.caption}>{item.caption}</Text>}
       <Text style={styles.timestamp}>
         {new Date(item.created_at).toLocaleString()}
@@ -87,52 +102,93 @@ export default function HomeFeedScreen() {
   );
 
   return (
-    <View style={styles.container}>
-      {loading ? (
-        <Text>Loading feed...</Text>
-      ) : posts.length ? (
-        <FlatList
-          data={posts}
-          keyExtractor={(item) => item.id.toString()}
-          renderItem={renderPost}
-        />
-      ) : (
-        <Text>No posts from your friends yet.</Text>
-      )}
-    </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <Text style={styles.header}>Proofs</Text>
+
+        {loading ? (
+          <ActivityIndicator size="large" color="#007aff" />
+        ) : posts.length ? (
+          <FlatList
+            data={posts}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={renderPost}
+            contentContainerStyle={styles.feedContainer}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <Text style={styles.emptyText}>No posts from your friends yet.</Text>
+        )}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
-  post: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 12,
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  container: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+  },
+  header: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#111',
     marginBottom: 16,
+  },
+  feedContainer: {
+    paddingBottom: 100,
+  },
+  post: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
     padding: 12,
+    marginBottom: 16,
+  },
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  avatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#ddd',
+  },
+  username: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#111',
+  },
+  goal: {
+    fontSize: 13,
+    color: '#555',
   },
   image: {
     width: '100%',
     height: 240,
     borderRadius: 10,
-  },
-  username: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginTop: 8,
-  },
-  goal: {
-    fontSize: 14,
-    color: '#555',
-    marginTop: 2,
+    marginTop: 10,
   },
   caption: {
     fontSize: 14,
-    marginTop: 6,
+    marginTop: 8,
+    color: '#333',
   },
   timestamp: {
     fontSize: 12,
     color: '#888',
     marginTop: 4,
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: 50,
+    color: '#666',
+    fontSize: 16,
   },
 });

@@ -19,32 +19,32 @@ export default function RootLayout() {
   const segments = useSegments();
 
   const [appReady, setAppReady] = useState(false);
-  const [initialSessionChecked, setInitialSessionChecked] = useState(false);
   const [fontsLoaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
 
   useEffect(() => {
+    let subscription: ReturnType<typeof supabase.auth.onAuthStateChange>['data']['subscription'];
+
     const initializeApp = async () => {
       try {
         if (!fontsLoaded) return;
 
-        // 1. First check the persisted session
+        // Check for existing session
         const { data: { session } } = await supabase.auth.getSession();
-        
         const inAuthGroup = segments[0] === '(auth)';
-        
-        // 2. Handle initial routing based on auth state
+
+        // Handle initial routing
         if (session && inAuthGroup) {
           router.replace('/');
         } else if (!session && !inAuthGroup) {
           router.replace('/signin');
         }
 
-        // 3. Set up auth state listener for future changes
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        // Listen for future auth changes
+        const authListener = supabase.auth.onAuthStateChange((_event, session) => {
           const currentInAuthGroup = segments[0] === '(auth)';
-          
+
           if (session && currentInAuthGroup) {
             router.replace('/');
           } else if (!session && !currentInAuthGroup) {
@@ -52,19 +52,20 @@ export default function RootLayout() {
           }
         });
 
-        setInitialSessionChecked(true);
+        subscription = authListener.data.subscription;
+
         setAppReady(true);
         await SplashScreen.hideAsync();
-
-        return () => {
-          subscription?.unsubscribe();
-        };
       } catch (error) {
         console.error('Initialization error:', error);
       }
     };
 
     initializeApp();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, [fontsLoaded, segments]);
 
   if (!appReady) {
@@ -78,7 +79,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={DefaultTheme}>
       <Slot />
-      <StatusBar style="dark" /> {/* Force dark status bar regardless of theme */}
+      <StatusBar style="dark" />
     </ThemeProvider>
   );
-  }
+}
