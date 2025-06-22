@@ -68,81 +68,90 @@ export default function HomeFeedScreen() {
     setLoading(false);
   };
 
-  const fetchFeed = async (currentUserId: string) => {
-    try {
-      const { data: friendData, error: friendError } = await supabase
-        .from("friendships")
-        .select("friend_id")
-        .eq("user_id", currentUserId)
-        .eq("status", "accepted");
+const fetchFeed = async (currentUserId: string) => {
+  try {
+    // Fix: Select both user_id and friend_id to handle bidirectional friendships
+    const { data: friendData, error: friendError } = await supabase
+      .from("friendships")
+      .select("user_id, friend_id")
+      .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+      .eq("status", "accepted");
 
-      if (friendError) throw friendError;
+    if (friendError) throw friendError;
 
-      const friendIds = friendData?.map((entry) => entry.friend_id) || [];
-
-      if (!friendIds.length) {
-        setPosts([]);
-        return;
+    // Fix: Extract friend IDs from both directions of the relationship
+    const friendIds = friendData?.reduce((acc: string[], entry) => {
+      if (entry.user_id === currentUserId) {
+        acc.push(entry.friend_id);
+      } else if (entry.friend_id === currentUserId) {
+        acc.push(entry.user_id);
       }
+      return acc;
+    }, []) || [];
 
-      const { data: postData, error: postError } = await supabase
-        .from("proof")
-        .select(
-          `
-          id,
-          user_id,
-          caption,
-          created_at,
-          picture_url,
-          likes,
-          profile:user_id (
-            username,
-            first_name,
-            last_name,
-            profile_picture
-          ),
-          challenges:challenge_id (
-            name
-          )
-        `
-        )
-        .in("user_id", friendIds)
-        .order("created_at", { ascending: false });
-
-      if (postError) throw postError;
-
-      // Check which posts the current user has liked
-      const postIds = postData?.map((post) => post.id) || [];
-      const { data: userLikes, error: likesError } = await supabase
-        .from("user_likes")
-        .select("proof_id")
-        .eq("user_id", currentUserId)
-        .in("proof_id", postIds);
-
-      if (likesError) {
-        console.warn("Could not fetch user likes:", likesError);
-      }
-
-      const likedPostIds = new Set(
-        userLikes?.map((like) => like.proof_id) || []
-      );
-
-      const postsWithLikeStatus =
-        postData?.map((post) => ({
-          ...post,
-          profile: Array.isArray(post.profile) ? post.profile[0] : post.profile,
-          challenges: Array.isArray(post.challenges)
-            ? post.challenges[0]
-            : post.challenges,
-          userHasLiked: likedPostIds.has(post.id),
-        })) || [];
-
-      setPosts(postsWithLikeStatus);
-    } catch (err) {
-      console.error("Feed load error:", err);
-      Alert.alert("Error", "Failed to load feed. Please try again.");
+    if (!friendIds.length) {
+      setPosts([]);
+      return;
     }
-  };
+
+    const { data: postData, error: postError } = await supabase
+      .from("proof")
+      .select(
+        `
+        id,
+        user_id,
+        caption,
+        created_at,
+        picture_url,
+        likes,
+        profile:user_id (
+          username,
+          first_name,
+          last_name,
+          profile_picture
+        ),
+        challenges:challenge_id (
+          name
+        )
+      `
+      )
+      .in("user_id", friendIds)
+      .order("created_at", { ascending: false });
+
+    if (postError) throw postError;
+
+    // Check which posts the current user has liked
+    const postIds = postData?.map((post) => post.id) || [];
+    const { data: userLikes, error: likesError } = await supabase
+      .from("user_likes")
+      .select("proof_id")
+      .eq("user_id", currentUserId)
+      .in("proof_id", postIds);
+
+    if (likesError) {
+      console.warn("Could not fetch user likes:", likesError);
+    }
+
+    const likedPostIds = new Set(
+      userLikes?.map((like) => like.proof_id) || []
+    );
+
+    const postsWithLikeStatus =
+      postData?.map((post) => ({
+        ...post,
+        profile: Array.isArray(post.profile) ? post.profile[0] : post.profile,
+        challenges: Array.isArray(post.challenges)
+          ? post.challenges[0]
+          : post.challenges,
+        userHasLiked: likedPostIds.has(post.id),
+      })) || [];
+
+    setPosts(postsWithLikeStatus);
+  } catch (err) {
+    console.error("Feed load error:", err);
+    Alert.alert("Error", "Failed to load feed. Please try again.");
+  }
+};
 
   const onRefresh = async () => {
     if (!userId) return;
