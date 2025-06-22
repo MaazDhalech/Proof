@@ -371,6 +371,14 @@ const submitToSupabase = async () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
+        <View style={styles.centerContent}>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', marginBottom: 20 }}>
+            {challengeName}
+          </Text>
+          <Text style={{ fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 20 }}>
+            {challengeDescription}
+          </Text>
+        </View>
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {isLoading && (
             <View style={styles.centerContent}>
