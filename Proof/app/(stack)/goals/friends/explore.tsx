@@ -2,18 +2,19 @@ import { supabase } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    FlatList,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  FlatList,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 type User = {
   id: string;
   name: string;
   username: string;
+  hasPendingRequest: boolean;
 };
 
 export default function ExploreFriendsScreen() {
@@ -37,17 +38,34 @@ export default function ExploreFriendsScreen() {
   }, []);
 
   const fetchUsersNotFriends = async (uid: string) => {
+    // Fetch existing friendships (accepted friends)
     const { data: existingRelations, error } = await supabase
       .from('friendships')
       .select('friend_id')
-      .eq('user_id', uid);
+      .eq('user_id', uid)
+      .eq('status', 'accepted');
 
     if (error) {
       console.error('Error fetching friendships:', error);
       return;
     }
 
+    // Fetch pending friend requests that I sent
+    const { data: pendingRequests, error: pendingError } = await supabase
+      .from('friendships')
+      .select('friend_id')
+      .eq('user_id', uid)
+      .eq('status', 'pending');
+
+    if (pendingError) {
+      console.error('Error fetching pending requests:', pendingError);
+      return;
+    }
+
     const friendIds = existingRelations?.map((f) => f.friend_id) || [];
+    const pendingIds = pendingRequests?.map((f) => f.friend_id) || [];
+    
+    // Only exclude actual friends (accepted), not pending requests
     const excludedIds = [...friendIds, uid];
     const formattedList = `(${excludedIds.map((id) => `"${id}"`).join(',')})`;
 
@@ -65,6 +83,7 @@ export default function ExploreFriendsScreen() {
       id: user.id,
       username: user.username,
       name: `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim(),
+      hasPendingRequest: pendingIds.includes(user.id),
     }));
 
     setAllUsers(formatted);
@@ -84,7 +103,14 @@ export default function ExploreFriendsScreen() {
     if (error) {
       console.error('Error sending friend request:', error);
     } else {
-      setAllUsers((prev) => prev.filter((u) => u.id !== friendId));
+      // Update the user's status to show pending request
+      setAllUsers((prev) => 
+        prev.map((user) => 
+          user.id === friendId 
+            ? { ...user, hasPendingRequest: true }
+            : user
+        )
+      );
     }
   };
 
@@ -110,13 +136,25 @@ export default function ExploreFriendsScreen() {
         <View style={styles.textContainer}>
           <Text style={styles.name}>{item.name}</Text>
           <Text style={styles.username}>@{item.username}</Text>
+          {item.hasPendingRequest && (
+            <Text style={styles.pendingStatus}>Friend request sent</Text>
+          )}
         </View>
       </View>
       <TouchableOpacity
-        style={styles.button}
-        onPress={() => sendFriendRequest(item.id)}
+        style={[
+          styles.button,
+          item.hasPendingRequest && styles.disabledButton
+        ]}
+        onPress={() => !item.hasPendingRequest && sendFriendRequest(item.id)}
+        disabled={item.hasPendingRequest}
       >
-        <Text style={styles.buttonText}>Send Friend Request</Text>
+        <Text style={[
+          styles.buttonText,
+          item.hasPendingRequest && styles.disabledButtonText
+        ]}>
+          {item.hasPendingRequest ? 'Request Pending' : 'Send Friend Request'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -131,10 +169,13 @@ export default function ExploreFriendsScreen() {
       </TouchableOpacity>
 
       <Text style={styles.heading}>Explore New Friends</Text>
+      <Text style={styles.subheading}>
+        Discover and connect with new people
+      </Text>
 
       <TextInput
         style={styles.searchInput}
-        placeholder="Search users..."
+        placeholder="Search by name or username..."
         value={searchText}
         onChangeText={setSearchText}
       />
@@ -144,6 +185,15 @@ export default function ExploreFriendsScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderUser}
         contentContainerStyle={{ paddingBottom: 100 }}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No users found</Text>
+            <Text style={styles.emptySubtext}>
+              {searchText ? 'Try adjusting your search' : 'Check back later for new users'}
+            </Text>
+          </View>
+        }
       />
     </View>
   );
@@ -154,7 +204,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: 60,
     paddingHorizontal: 20,
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
   },
   backButton: {
     alignSelf: 'flex-start',
@@ -179,41 +229,59 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 8,
     color: '#111',
   },
+  subheading: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 24,
+  },
   searchInput: {
-    height: 40,
-    borderColor: '#ccc',
+    height: 48,
+    borderColor: '#ddd',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    marginBottom: 16,
-    backgroundColor: '#f9f9f9',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: '#fff',
+    fontSize: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   card: {
-    backgroundColor: '#f1f1f1',
-    padding: 16,
-    borderRadius: 10,
+    backgroundColor: '#ffffff',
+    padding: 20,
+    borderRadius: 16,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
   userInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: '#6366f1',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
   avatarText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
   },
   textContainer: {
@@ -221,23 +289,61 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#111',
+    marginBottom: 2,
   },
   username: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#666',
-    marginTop: 4,
+    marginBottom: 4,
+  },
+  pendingStatus: {
+    fontSize: 13,
+    color: '#FF9500',
+    fontWeight: '600',
+    marginTop: 2,
   },
   button: {
-    marginTop: 8,
     backgroundColor: '#007aff',
-    padding: 10,
-    borderRadius: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 10,
     alignItems: 'center',
+    shadowColor: '#007aff',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  disabledButton: {
+    backgroundColor: '#e9ecef',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   buttonText: {
     color: '#fff',
     fontWeight: '600',
+    fontSize: 16,
+  },
+  disabledButtonText: {
+    color: '#999',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
   },
 });
