@@ -2,16 +2,16 @@ import { supabase } from '@/services/supabase';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 export default function SignInScreen() {
@@ -37,6 +37,10 @@ export default function SignInScreen() {
 
   const goToSignUp = () => {
     router.push('/(auth)/signup');
+  };
+
+  const goToForgotPassword = () => {
+    router.push('/(auth)/forgot');
   };
 
   return (
@@ -81,6 +85,13 @@ export default function SignInScreen() {
               secureTextEntry
               returnKeyType="done"
             />
+
+            <TouchableOpacity 
+              style={styles.forgotPasswordButton} 
+              onPress={goToForgotPassword}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
               <Text style={styles.signInButtonText}>Sign In</Text>
@@ -140,6 +151,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     borderWidth: 1,
     borderColor: '#e1e3e6',
+  },
+  forgotPasswordButton: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+  },
+  forgotPasswordText: {
+    color: '#0066ff',
+    fontSize: 14,
+    fontWeight: '500',
   },
   signInButton: {
     backgroundColor: '#0066ff',
