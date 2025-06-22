@@ -1,75 +1,138 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { supabase } from '@/services/supabase';
+import { useEffect, useState } from 'react';
+import { FlatList, Image, StyleSheet, Text, View } from 'react-native';
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+export default function HomeFeedScreen() {
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
 
-export default function HomeScreen() {
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+
+      const currentUserId = session?.user?.id ?? null;
+      setUserId(currentUserId);
+
+      if (currentUserId) {
+        fetchFeed(currentUserId);
+      }
+    };
+
+    getCurrentUser();
+  }, []);
+
+  const fetchFeed = async (currentUserId: string) => {
+    try {
+      // Get friend list
+      const { data: friendData, error: friendError } = await supabase
+        .from('friends')
+        .select('friends')
+        .eq('user_id', currentUserId)
+        .single();
+
+      if (friendError) throw friendError;
+
+      const friendIds = friendData?.friends || [];
+
+      if (!friendIds.length) {
+        setPosts([]);
+        setLoading(false);
+        return;
+      }
+
+      // Get recent check-ins from friends
+      const { data: postData, error: postError } = await supabase
+        .from('proof')
+        .select(`
+          id,
+          user_id,
+          picture,
+          caption,
+          created_at,
+          profile (
+            username,
+            profile
+          ),
+          challenges (
+            name
+          )
+        `)
+        .in('user_id', friendIds)
+        .order('created_at', { ascending: false });
+
+      if (postError) throw postError;
+
+      setPosts(postData);
+    } catch (err) {
+      console.error('Feed load error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderPost = ({ item }: { item: any }) => (
+    <View style={styles.post}>
+      <Image source={{ uri: item.picture }} style={styles.image} />
+      <Text style={styles.username}>{item.profile?.username}</Text>
+      <Text style={styles.goal}>Goal: {item.challenges?.name}</Text>
+      {item.caption && <Text style={styles.caption}>{item.caption}</Text>}
+      <Text style={styles.timestamp}>
+        {new Date(item.created_at).toLocaleString()}
+      </Text>
+    </View>
+  );
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
+    <View style={styles.container}>
+      {loading ? (
+        <Text>Loading feed...</Text>
+      ) : posts.length ? (
+        <FlatList
+          data={posts}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderPost}
         />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      ) : (
+        <Text>No posts from your friends yet.</Text>
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: { flex: 1, padding: 16, backgroundColor: '#fff' },
+  post: {
+    backgroundColor: '#f9f9f9',
+    borderRadius: 12,
+    marginBottom: 16,
+    padding: 12,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  image: {
+    width: '100%',
+    height: 240,
+    borderRadius: 10,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  username: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginTop: 8,
+  },
+  goal: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 2,
+  },
+  caption: {
+    fontSize: 14,
+    marginTop: 6,
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 4,
   },
 });
