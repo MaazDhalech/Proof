@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import Chatbot from '@/components/Chatbot'; // Adjust path as needed
 
 type CheckinStatus = {
   date: string;
@@ -39,8 +40,16 @@ export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'your' | 'friends'>('your');
+  const [userId, setUserId] = useState<string | undefined>();
 
   useEffect(() => {
+    // Get current user ID for chatbot
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUserId(user?.id);
+    };
+    getCurrentUser();
+
     if (tab === 'your') fetchGoals();
     // future: fetch friends' goals if tab === 'friends'
   }, [tab]);
@@ -342,7 +351,7 @@ const fetchGoals = async () => {
         onPress={() => router.push({
           pathname: `/goals/${item.id}/check-in`,
           params: {
-            challengeName: item.title,
+            challengeName: item.name, // Fixed: was item.title
             challengeDescription: item.description,
             id: item.id
           }
@@ -405,6 +414,9 @@ const fetchGoals = async () => {
           <Text style={styles.createButtonText}>+ Create New Goal</Text>
         </TouchableOpacity>
       )}
+
+      {/* Integrated Chatbot */}
+      <Chatbot userId={userId} />
     </SafeAreaView>
   );
 }
