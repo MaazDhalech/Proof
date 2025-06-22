@@ -1,3 +1,4 @@
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { supabase } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
@@ -37,6 +38,8 @@ type Goal = {
 
 export default function GoalsPage() {
   const router = useRouter();
+  const { expoPushToken, notification } = usePushNotifications(); // ✅ Correctly call the hook
+
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'your' | 'friends'>('your');
@@ -51,7 +54,6 @@ export default function GoalsPage() {
     getCurrentUser();
 
     if (tab === 'your') fetchGoals();
-    // future: fetch friends' goals if tab === 'friends'
   }, [tab]);
 
   const getWeekStart = (date: Date) => {
@@ -371,13 +373,17 @@ const fetchGoals = async () => {
           style={[styles.tab, tab === 'your' && styles.activeTab]}
           onPress={() => setTab('your')}
         >
-          <Text style={[styles.tabText, tab === 'your' && styles.activeTabText]}>Your Goals</Text>
+          <Text style={[styles.tabText, tab === 'your' && styles.activeTabText]}>
+            Your Goals
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, tab === 'friends' && styles.activeTab]}
           onPress={() => setTab('friends')}
         >
-          <Text style={[styles.tabText, tab === 'friends' && styles.activeTabText]}>Friends' Goals</Text>
+          <Text style={[styles.tabText, tab === 'friends' && styles.activeTabText]}>
+            Friends' Goals
+          </Text>
         </TouchableOpacity>
       </View>
 

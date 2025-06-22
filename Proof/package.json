@@ -2,6 +2,7 @@
   "name": "proof",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "private": true,
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -26,6 +27,8 @@
     "expo-blur": "~14.1.5",
     "expo-camera": "~16.1.8",
     "expo-constants": "~17.1.6",
+    "expo-dev-client": "~5.2.1",
+    "expo-device": "~7.1.4",
     "expo-font": "~13.3.1",
     "expo-haptics": "~14.1.4",
     "expo-image": "~2.3.0",
@@ -60,6 +63,5 @@
     "eslint": "^9.29.0",
     "eslint-config-expo": "~9.2.0",
     "typescript": "~5.8.3"
-  },
-  "private": true
+  }
 }
