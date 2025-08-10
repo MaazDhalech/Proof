@@ -89,11 +89,123 @@ export default function ExploreFriendsScreen() {
     }
   };
 
-  const filteredUsers = allUsers.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchText.toLowerCase()) ||
-      user.username.toLowerCase().includes(searchText.toLowerCase())
-  );
+  // Robust fuzzy search with multi-word support
+  function fuzzyScore(text, search) {
+    if (!search) return 1;
+    if (!text) return 0;
+    
+    const textLower = text.toLowerCase();
+    const searchLower = search.toLowerCase();
+    const cleanText = textLower.replace(/[\s\-_.]+/g, '');
+    const cleanSearch = searchLower.replace(/[\s\-_.]+/g, '');
+    
+    // Split search into multiple words
+    const searchWords = searchLower.trim().split(/[\s]+/).filter(word => word.length > 0);
+    
+    // Handle multi-word searches
+    if (searchWords.length > 1) {
+      let totalScore = 0;
+      let wordsMatched = 0;
+      
+      for (const searchWord of searchWords) {
+        const wordScore = fuzzyScore(text, searchWord); // Recursive call for each word
+        if (wordScore > 0) {
+          totalScore += wordScore;
+          wordsMatched++;
+        }
+      }
+      
+      // Only return a score if most words matched
+      if (wordsMatched >= Math.ceil(searchWords.length * 0.7)) {
+        return totalScore / searchWords.length; // Average score
+      } else {
+        return 0;
+      }
+    }
+    
+    // Single word search (original logic)
+    const singleSearch = searchWords[0] || searchLower;
+    
+    // Exact matches (highest priority)
+    if (textLower === singleSearch || cleanText === singleSearch.replace(/[\s\-_.]+/g, '')) return 100;
+    
+    // Substring matches (high priority)
+    if (textLower.includes(singleSearch)) return 90;
+    if (cleanText.includes(singleSearch.replace(/[\s\-_.]+/g, ''))) return 85;
+    
+    // Word boundary matches
+    const words = textLower.split(/[\s\-_.]+/);
+    for (const word of words) {
+      if (word.startsWith(singleSearch)) return 75;
+      if (word.includes(singleSearch)) return 60;
+    }
+    
+    // Simple edit distance for typo tolerance
+    function editDistance(str1, str2) {
+      if (Math.abs(str1.length - str2.length) > 3) return Infinity;
+      
+      const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
+      for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+      for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+      
+      for (let j = 1; j <= str2.length; j++) {
+        for (let i = 1; i <= str1.length; i++) {
+          const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+          matrix[j][i] = Math.min(
+            matrix[j][i - 1] + 1,
+            matrix[j - 1][i] + 1,
+            matrix[j - 1][i - 1] + cost
+          );
+        }
+      }
+      return matrix[str2.length][str1.length];
+    }
+    
+    // Check for typos in words
+    if (singleSearch.length >= 3) {
+      for (const word of words) {
+        const distance = editDistance(word, singleSearch);
+        const maxAllowed = Math.floor(singleSearch.length / 3);
+        if (distance <= maxAllowed) {
+          return 50 - (distance * 10);
+        }
+      }
+    }
+    
+    // Character sequence matching
+    let searchIndex = 0;
+    let score = 0;
+    let consecutiveBonus = 1;
+    const cleanSingleSearch = singleSearch.replace(/[\s\-_.]+/g, '');
+    
+    for (let i = 0; i < cleanText.length && searchIndex < cleanSingleSearch.length; i++) {
+      if (cleanText[i] === cleanSingleSearch[searchIndex]) {
+        score += consecutiveBonus;
+        consecutiveBonus = Math.min(consecutiveBonus + 1, 5); // Max bonus of 5
+        searchIndex++;
+      } else {
+        consecutiveBonus = 1;
+      }
+    }
+    
+    if (searchIndex === cleanSingleSearch.length) {
+      return Math.min(score, 40); // Cap at 40 for sequence matches
+    }
+    
+    return 0;
+  }
+
+  // Replace your filter with this:
+  const filteredUsers = allUsers
+    .map(user => ({
+      ...user,
+      score: Math.max(
+        fuzzyScore(user.name, searchText),
+        fuzzyScore(user.username, searchText)
+      )
+    }))
+    .filter(user => user.score > 0)
+    .sort((a, b) => b.score - a.score);
 
   const renderUser = ({ item }: { item: User }) => (
     <View style={styles.card}>
