@@ -11,7 +11,6 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
-import Chatbot from '@/components/Chatbot'; // Adjust path as needed
 
 type Goal = {
   id: string;
@@ -563,8 +562,6 @@ export default function GoalsPage() {
         </View>
       )}
 
-      {/* Add the Chatbot component - it includes the floating chat button */}
-      <Chatbot userId={userId} />
     </View>
   );
 }

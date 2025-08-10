@@ -196,16 +196,17 @@ export default function ExploreFriendsScreen() {
   }
 
   // Replace your filter with this:
-  const filteredUsers = allUsers
-    .map(user => ({
-      ...user,
-      score: Math.max(
-        fuzzyScore(user.name, searchText),
-        fuzzyScore(user.username, searchText)
-      )
-    }))
-    .filter(user => user.score > 0)
-    .sort((a, b) => b.score - a.score);
+  const filteredUsers = searchText.trim() === '' ? [] // If the search text is empty, return an empty list
+    : allUsers
+      .map(user => ({
+        ...user,
+        score: Math.max(
+          fuzzyScore(user.name, searchText),
+          fuzzyScore(user.username, searchText)
+        )
+      }))
+      .filter(user => user.score > 0)
+      .sort((a, b) => b.score - a.score);
 
   const renderUser = ({ item }: { item: User }) => (
     <View style={styles.card}>
