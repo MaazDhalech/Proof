@@ -52,6 +52,7 @@ type UserProfile = {
 type UserStats = {
   goalsCompleted: number;
   longestStreak: number;
+
   completionRate: number;
   totalGoals: number;
 };
@@ -62,7 +63,24 @@ type ViewProfilePopupProps = {
   onClose: () => void;
 };
 
-const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) => {
+interface ReportData {
+  reason: string;
+  details?: string;
+}
+
+const reportReasons = [
+  "Inappropriate content",
+  "Spam",
+  "Harassment",
+  "Misinformation",
+  "Other",
+];
+
+const ViewProfilePopup = ({
+  userId,
+  visible,
+  onClose,
+}: ViewProfilePopupProps) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats>({
     goalsCompleted: 0,
@@ -71,6 +89,13 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
     totalGoals: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [isReporting, setIsReporting] = useState(false); // New state to track report form
+  const [reportData, setReportData] = useState<ReportData>({
+    reason: "",
+    details: "",
+  });
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -79,16 +104,19 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
       try {
         const { data: profileData, error: profileError } = await supabase
           .from("profile")
-          .select("id, first_name, last_name, username, longest_streak, goals_completed, goal_completion_rate")
+          .select(
+            "id, first_name, last_name, username, longest_streak, goals_completed, goal_completion_rate"
+          )
           .eq("id", userId)
           .single();
 
         if (profileError) throw profileError;
 
-        const { count: totalChallenges, error: challengesError } = await supabase
-          .from("challenges")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", userId);
+        const { count: totalChallenges, error: challengesError } =
+          await supabase
+            .from("challenges")
+            .select("*", { count: "exact", head: true })
+            .eq("user_id", userId);
 
         if (challengesError) throw challengesError;
 
@@ -113,11 +141,68 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
     };
 
     fetchUserData();
+
+    const keyboardDidShowListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (event) => {
+        setKeyboardOffset(event.endCoordinates.height);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardOffset(0);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, [userId, visible]);
+
+  const handleReport = async () => {
+    if (!userId) {
+      Alert.alert("Error", "You must be logged in to report a profile.");
+      return;
+    }
+
+    if (!reportData.reason) {
+      Alert.alert("Error", "Please select a reason for reporting.");
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from("reports").insert({
+        type: "PROFILE",
+        reported_profile_id: userId,
+        reported_by: (await supabase.auth.getSession()).data.session?.user.id,
+        reason: reportData.reason,
+        details: reportData.details || null,
+        status: "pending",
+      });
+
+      if (error) throw error;
+      Alert.alert("Success", "Profile reported successfully.");
+    } catch (error) {
+      console.error("Error reporting profile:", error);
+      Alert.alert("Error", "Failed to report profile. Please try again.");
+    } finally {
+      setMenuVisible(false);
+      setReportData({ reason: "", details: "" });
+      setIsReporting(false); // Reset reporting state
+    }
+  };
+
+  const handleBlock = () => {
+    Alert.alert("Block User", "This feature is not yet implemented.");
+    setMenuVisible(false);
+  };
 
   if (!user && !loading) return null;
 
-  const initials = `${user?.first_name?.[0] || ""}${user?.last_name?.[0] || ""}`.toUpperCase();
+  const initials =
+    `${user?.first_name?.[0] || ""}${user?.last_name?.[0] || ""}`.toUpperCase();
 
   return (
     <Modal
@@ -142,6 +227,12 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
                   {user?.first_name} {user?.last_name}
                 </Text>
                 <Text style={styles.popupUsername}>@{user?.username}</Text>
+                <TouchableOpacity
+                  style={styles.actionMenuButton}
+                  onPress={() => setMenuVisible(true)}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={24} color="#666" />
+                </TouchableOpacity>
               </View>
 
               <View style={styles.statsContainer}>
@@ -151,13 +242,17 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
                     <Text style={styles.statLabel}>Longest Streak</Text>
                   </View>
                   <View style={styles.statItem}>
-                    <Text style={styles.statNumber}>{stats.completionRate}%</Text>
+                    <Text style={styles.statNumber}>
+                      {stats.completionRate}%
+                    </Text>
                     <Text style={styles.statLabel}>Completion Rate</Text>
                   </View>
                 </View>
                 <View style={styles.statRow}>
                   <View style={styles.statItem}>
-                    <Text style={styles.statNumber}>{stats.goalsCompleted}</Text>
+                    <Text style={styles.statNumber}>
+                      {stats.goalsCompleted}
+                    </Text>
                     <Text style={styles.statLabel}>Goals Completed</Text>
                   </View>
                   <View style={styles.statItem}>
@@ -173,6 +268,146 @@ const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) =
             </>
           )}
         </View>
+
+        <Modal
+          visible={menuVisible}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => {
+            setMenuVisible(false);
+            setReportData({ reason: "", details: "" });
+            setIsReporting(false); // Reset reporting state
+            Keyboard.dismiss();
+          }}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            onPress={() => {
+              Keyboard.dismiss();
+            }}
+            activeOpacity={1}
+          >
+            <KeyboardAvoidingView
+              behavior={Platform.OS === "ios" ? "padding" : "height"}
+              keyboardVerticalOffset={Platform.OS === "ios" ? -375 : 0}
+              style={styles.keyboardAvoidingContainer}
+            >
+              <View
+                style={[
+                  styles.menuContainer,
+                  { transform: [{ translateY: -keyboardOffset }] },
+                ]}
+              >
+                <TouchableOpacity
+                  activeOpacity={1}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    Keyboard.dismiss();
+                  }}
+                >
+                  <Text style={styles.menuTitle}>
+                    {isReporting ? "Report Profile" : "Profile Actions"}
+                  </Text>
+
+                  {!isReporting ? (
+                    <>
+                      <TouchableOpacity
+                        style={styles.actionMenuItem}
+                        onPress={() => {
+                          setIsReporting(true);
+                          setReportData({
+                            ...reportData,
+                            reason: reportReasons[0],
+                          });
+                        }}
+                      >
+                        <Text style={styles.actionMenuItemText}>
+                          Report Profile
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.actionMenuItem}
+                        onPress={handleBlock}
+                      >
+                        <Text style={styles.actionMenuItemText}>
+                          Block User
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.menuSubtitle}>
+                        Reason for reporting
+                      </Text>
+                      <View style={styles.reasonContainer}>
+                        {reportReasons.map((reason) => (
+                          <TouchableOpacity
+                            key={reason}
+                            style={[
+                              styles.reasonButton,
+                              reportData.reason === reason &&
+                                styles.reasonButtonSelected,
+                            ]}
+                            onPress={() =>
+                              setReportData({ ...reportData, reason })
+                            }
+                          >
+                            <Text
+                              style={[
+                                styles.reasonButtonText,
+                                reportData.reason === reason &&
+                                  styles.reasonButtonTextSelected,
+                              ]}
+                            >
+                              {reason}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={styles.menuSubtitle}>
+                        Additional details (optional)
+                      </Text>
+                      <TextInput
+                        style={styles.detailsInput}
+                        placeholder="Enter details..."
+                        value={reportData.details}
+                        onChangeText={(text) =>
+                          setReportData({ ...reportData, details: text })
+                        }
+                        multiline
+                        textAlignVertical="top"
+                      />
+                    </>
+                  )}
+
+                  <View style={styles.buttonContainer}>
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.cancelButton]}
+                      onPress={() => {
+                        setMenuVisible(false);
+                        setReportData({ reason: "", details: "" });
+                        setIsReporting(false); // Reset reporting state
+                        Keyboard.dismiss();
+                      }}
+                    >
+                      <Text style={styles.actionButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    {isReporting && (
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.submitButton]}
+                        onPress={handleReport}
+                      >
+                        <Text style={styles.actionButtonText}>
+                          Submit Report
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </TouchableOpacity>
+        </Modal>
       </View>
     </Modal>
   );
@@ -192,14 +427,6 @@ export default function HomeFeedScreen() {
   const [profilePopupVisible, setProfilePopupVisible] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const router = useRouter();
-
-  const reportReasons = [
-    "Inappropriate content",
-    "Spam",
-    "Harassment",
-    "Misinformation",
-    "Other",
-  ];
 
   useEffect(() => {
     loadUserAndData();
@@ -1065,5 +1292,21 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 16,
     fontWeight: "600",
+  },
+  actionMenuButton: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    padding: 8,
+  },
+  actionMenuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#e0e0e0",
+  },
+  actionMenuItemText: {
+    fontSize: 16,
+    color: "#1a1a1a",
   },
 });
