@@ -1,4 +1,5 @@
 import { supabase } from "@/services/supabase";
+import { Filter } from "bad-words";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -22,6 +23,8 @@ declare namespace JSX {
     [elemName: string]: any;
   }
 }
+
+const filter = new Filter();
 
 type UserProfile = {
   id: string;
@@ -103,46 +106,114 @@ const US_STATES = [
 const SettingsOverlay = ({
   visible,
   onClose,
+  user,
 }: {
   visible: boolean;
   onClose: () => void;
+  user: UserProfile | null;
 }) => {
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [tosModalVisible, setTosModalVisible] = useState(false);
+  const [contactModalVisible, setContactModalVisible] = useState(false);
   const [privacyContent, setPrivacyContent] = useState<string>("");
   const [tosContent, setTosContent] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [contactForm, setContactForm] = useState({
+    name:
+      user?.first_name && user?.last_name
+        ? `${user.first_name} ${user.last_name}`
+        : "",
+    email: user?.email || "",
+    message: "",
+  });
+  const [contactLoading, setContactLoading] = useState(false);
 
   useEffect(() => {
-const fetchPolicies = async () => {
-  setLoading(true);
-  try {
-    const privacyResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
-    );
-    const privacyText = await privacyResponse.text();
-    setPrivacyContent(privacyText);
+    const fetchPolicies = async () => {
+      setLoading(true);
+      try {
+        const privacyResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
+        );
+        const privacyText = await privacyResponse.text();
+        setPrivacyContent(privacyText);
 
-    const tosResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
-    );
-    const tosText = await tosResponse.text();
-    setTosContent(tosText);
-  } catch (error) {
-    console.error("Error fetching policies:", error);
-    Alert.alert(
-      "Error",
-      "Failed to load Privacy Policy or Terms of Service"
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+        const tosResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
+        );
+        const tosText = await tosResponse.text();
+        setTosContent(tosText);
+      } catch (error) {
+        console.error("Error fetching policies:", error);
+        Alert.alert(
+          "Error",
+          "Failed to load Privacy Policy or Terms of Service"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
     if (visible) {
       fetchPolicies();
     }
   }, [visible]);
+
+  const handleContactSubmit = async () => {
+    if (!contactForm.name || !contactForm.email || !contactForm.message) {
+      Alert.alert("Validation Error", "Please fill all required fields");
+      return;
+    }
+
+    if (
+      filter.isProfane(contactForm.name) ||
+      filter.isProfane(contactForm.message)
+    ) {
+      Alert.alert(
+        "Validation Error",
+        "Inappropriate words detected in form fields"
+      );
+      return;
+    }
+
+    setContactLoading(true);
+    try {
+      const response = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          access_key: "955bb62c-93de-48eb-814e-e76d1ba9b27e",
+          subject: `[APP] Support - ${user?.username || "Unknown User"}`,
+          name: contactForm.name,
+          email: contactForm.email,
+          message: `User ID: ${user?.id || "N/A"}\nUsername: ${user?.username || "N/A"}\n\nMessage:\n${contactForm.message}`,
+        }),
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        Alert.alert("Success", "Your message has been sent successfully!");
+        setContactForm({
+          name:
+            user?.first_name && user?.last_name
+              ? `${user.first_name} ${user.last_name}`
+              : "",
+          email: user?.email || "",
+          message: "",
+        });
+        setContactModalVisible(false);
+      } else {
+        throw new Error(result.message || "Failed to send message");
+      }
+    } catch (error) {
+      console.error("Error submitting contact form:", error);
+      Alert.alert("Error", "Failed to send your message. Please try again.");
+    } finally {
+      setContactLoading(false);
+    }
+  };
 
   const handleSignOut = async () => {
     try {
@@ -312,11 +383,11 @@ const fetchPolicies = async () => {
       visible={visible}
       onRequestClose={onClose}
     >
-              <View style={styles.backButtonContainer}>
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.backButtonContainer}>
+        <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.settingsContainer}>
         <View style={styles.settingsHeader}>
           <Text style={styles.settingsTitle}>Settings</Text>
@@ -339,6 +410,12 @@ const fetchPolicies = async () => {
               onPress={() => setTosModalVisible(true)}
             >
               <Text style={styles.buttonText}>Terms of Service</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => setContactModalVisible(true)}
+            >
+              <Text style={styles.buttonText}>Contact Support</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.logoutButton}
@@ -379,6 +456,89 @@ const fetchPolicies = async () => {
               <Text style={styles.closeButtonText}>Close</Text>
             </TouchableOpacity>
           </View>
+        </Modal>
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={contactModalVisible}
+          onRequestClose={() => setContactModalVisible(false)}
+        >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalContainer}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 20} // Increased offset for Dynamic Island
+          >
+            <ScrollView
+              contentContainerStyle={[
+                styles.modalScrollContent,
+                { paddingTop: Platform.OS === "ios" ? 40 : 0 },
+              ]} // Extra padding for Dynamic Island
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.modalContent}>
+                <Text style={styles.modalTitle}>Contact Support</Text>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>Name</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={contactForm.name}
+                    onChangeText={(text) =>
+                      setContactForm({ ...contactForm, name: text })
+                    }
+                    placeholder="Your Name"
+                    returnKeyType="next"
+                  />
+                </View>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>Email</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={contactForm.email}
+                    onChangeText={(text) =>
+                      setContactForm({ ...contactForm, email: text })
+                    }
+                    placeholder="Your Email"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    returnKeyType="next"
+                  />
+                </View>
+                <View style={styles.modalInputGroup}>
+                  <Text style={styles.modalLabel}>Message</Text>
+                  <TextInput
+                    style={[styles.modalInput, { height: 100 }]}
+                    value={contactForm.message}
+                    onChangeText={(text) =>
+                      setContactForm({ ...contactForm, message: text })
+                    }
+                    placeholder="Your Message"
+                    multiline
+                    numberOfLines={4}
+                    returnKeyType="done"
+                  />
+                </View>
+                <View style={styles.modalButtons}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => setContactModalVisible(false)}
+                  >
+                    <Text style={styles.modalButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.modalSaveButton}
+                    onPress={handleContactSubmit}
+                    disabled={contactLoading}
+                  >
+                    {contactLoading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Text style={styles.modalButtonText}>Submit</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </Modal>
       </View>
     </Modal>
@@ -557,6 +717,18 @@ export default function ProfileScreen() {
         return;
       }
 
+      if (
+        filter.isProfane(tempData.first_name) ||
+        filter.isProfane(tempData.last_name) ||
+        filter.isProfane(tempData.username)
+      ) {
+        Alert.alert(
+          "Validation Error",
+          "Inappropriate words detected in profile fields"
+        );
+        return;
+      }
+
       const { error: profileError } = await supabase
         .from("profile")
         .update({
@@ -678,6 +850,7 @@ export default function ProfileScreen() {
       <SettingsOverlay
         visible={settingsVisible}
         onClose={() => setSettingsVisible(false)}
+        user={user}
       />
 
       <Modal
@@ -689,7 +862,7 @@ export default function ProfileScreen() {
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.modalContainer}
-          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 60 : 20}
         >
           <ScrollView
             ref={scrollViewRef}
@@ -951,13 +1124,13 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   settingsHeader: {
-    marginTop:0,
-    marginBottom: 24, // Reduced margin to adjust spacing
-    alignItems: "center", // Center the header content
+    marginTop: 0,
+    marginBottom: 24,
+    alignItems: "center",
   },
   backButtonContainer: {
-    marginTop: 48, // Space above the back button
-    marginBottom: 0, // Space below the back button
+    marginTop: 48,
+    marginBottom: 0,
   },
   backButton: {
     padding: 8,
@@ -971,7 +1144,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "700",
     color: "#1e293b",
-    textAlign: "center", // Center the title text
+    textAlign: "center",
   },
   loadingContainer: {
     flex: 1,
