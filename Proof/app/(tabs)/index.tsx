@@ -1,4 +1,5 @@
 import { supabase } from "@/services/supabase";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -6,9 +7,14 @@ import {
   Alert,
   FlatList,
   Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -38,10 +44,43 @@ export default function HomeFeedScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [likingPosts, setLikingPosts] = useState<Set<string>>(new Set());
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportDetails, setReportDetails] = useState("");
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const router = useRouter();
+
+  const reportReasons = [
+    "Inappropriate content",
+    "Spam",
+    "Harassment",
+    "Misinformation",
+    "Other",
+  ];
 
   useEffect(() => {
     loadUserAndData();
+
+    // Add keyboard event listeners
+    const keyboardDidShowListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (event) => {
+        setKeyboardOffset(event.endCoordinates.height);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => {
+        setKeyboardOffset(0);
+      }
+    );
+
+    // Cleanup listeners on unmount
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
   }, []);
 
   const loadUserAndData = async () => {
@@ -68,90 +107,88 @@ export default function HomeFeedScreen() {
     setLoading(false);
   };
 
-const fetchFeed = async (currentUserId: string) => {
-  try {
-    // Fix: Select both user_id and friend_id to handle bidirectional friendships
-    const { data: friendData, error: friendError } = await supabase
-      .from("friendships")
-      .select("user_id, friend_id")
-      .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
-      .eq("status", "accepted");
+  const fetchFeed = async (currentUserId: string) => {
+    try {
+      const { data: friendData, error: friendError } = await supabase
+        .from("friendships")
+        .select("user_id, friend_id")
+        .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+        .eq("status", "accepted");
 
-    if (friendError) throw friendError;
+      if (friendError) throw friendError;
 
-    // Fix: Extract friend IDs from both directions of the relationship
-    const friendIds = friendData?.reduce((acc: string[], entry) => {
-      if (entry.user_id === currentUserId) {
-        acc.push(entry.friend_id);
-      } else if (entry.friend_id === currentUserId) {
-        acc.push(entry.user_id);
+      const friendIds =
+        friendData?.reduce((acc: string[], entry) => {
+          if (entry.user_id === currentUserId) {
+            acc.push(entry.friend_id);
+          } else if (entry.friend_id === currentUserId) {
+            acc.push(entry.user_id);
+          }
+          return acc;
+        }, []) || [];
+
+      if (!friendIds.length) {
+        setPosts([]);
+        return;
       }
-      return acc;
-    }, []) || [];
 
-    if (!friendIds.length) {
-      setPosts([]);
-      return;
-    }
-
-    const { data: postData, error: postError } = await supabase
-      .from("proof")
-      .select(
+      const { data: postData, error: postError } = await supabase
+        .from("proof")
+        .select(
+          `
+          id,
+          user_id,
+          caption,
+          created_at,
+          picture_url,
+          likes,
+          profile:user_id (
+            username,
+            first_name,
+            last_name,
+            profile_picture
+          ),
+          challenges:challenge_id (
+            name
+          )
         `
-        id,
-        user_id,
-        caption,
-        created_at,
-        picture_url,
-        likes,
-        profile:user_id (
-          username,
-          first_name,
-          last_name,
-          profile_picture
-        ),
-        challenges:challenge_id (
-          name
         )
-      `
-      )
-      .in("user_id", friendIds)
-      .order("created_at", { ascending: false });
+        .in("user_id", friendIds)
+        .order("created_at", { ascending: false });
 
-    if (postError) throw postError;
+      if (postError) throw postError;
 
-    // Check which posts the current user has liked
-    const postIds = postData?.map((post) => post.id) || [];
-    const { data: userLikes, error: likesError } = await supabase
-      .from("user_likes")
-      .select("proof_id")
-      .eq("user_id", currentUserId)
-      .in("proof_id", postIds);
+      const postIds = postData?.map((post) => post.id) || [];
+      const { data: userLikes, error: likesError } = await supabase
+        .from("user_likes")
+        .select("proof_id")
+        .eq("user_id", currentUserId)
+        .in("proof_id", postIds);
 
-    if (likesError) {
-      console.warn("Could not fetch user likes:", likesError);
+      if (likesError) {
+        console.warn("Could not fetch user likes:", likesError);
+      }
+
+      const likedPostIds = new Set(
+        userLikes?.map((like) => like.proof_id) || []
+      );
+
+      const postsWithLikeStatus =
+        postData?.map((post) => ({
+          ...post,
+          profile: Array.isArray(post.profile) ? post.profile[0] : post.profile,
+          challenges: Array.isArray(post.challenges)
+            ? post.challenges[0]
+            : post.challenges,
+          userHasLiked: likedPostIds.has(post.id),
+        })) || [];
+
+      setPosts(postsWithLikeStatus);
+    } catch (err) {
+      console.error("Feed load error:", err);
+      Alert.alert("Error", "Failed to load feed. Please try again.");
     }
-
-    const likedPostIds = new Set(
-      userLikes?.map((like) => like.proof_id) || []
-    );
-
-    const postsWithLikeStatus =
-      postData?.map((post) => ({
-        ...post,
-        profile: Array.isArray(post.profile) ? post.profile[0] : post.profile,
-        challenges: Array.isArray(post.challenges)
-          ? post.challenges[0]
-          : post.challenges,
-        userHasLiked: likedPostIds.has(post.id),
-      })) || [];
-
-    setPosts(postsWithLikeStatus);
-  } catch (err) {
-    console.error("Feed load error:", err);
-    Alert.alert("Error", "Failed to load feed. Please try again.");
-  }
-};
+  };
 
   const onRefresh = async () => {
     if (!userId) return;
@@ -171,7 +208,6 @@ const fetchFeed = async (currentUserId: string) => {
 
     try {
       if (userHasLiked) {
-        // Unlike the post
         const { error: unlikeError } = await supabase
           .from("user_likes")
           .delete()
@@ -187,7 +223,6 @@ const fetchFeed = async (currentUserId: string) => {
 
         if (decrementError) throw decrementError;
 
-        // Update local state
         setPosts((prevPosts) =>
           prevPosts.map((post) =>
             post.id === postId
@@ -200,7 +235,6 @@ const fetchFeed = async (currentUserId: string) => {
           )
         );
       } else {
-        // Like the post
         const { error: likeError } = await supabase
           .from("user_likes")
           .insert({ user_id: userId, proof_id: postId });
@@ -214,7 +248,6 @@ const fetchFeed = async (currentUserId: string) => {
 
         if (incrementError) throw incrementError;
 
-        // Update local state
         setPosts((prevPosts) =>
           prevPosts.map((post) =>
             post.id === postId
@@ -232,6 +265,48 @@ const fetchFeed = async (currentUserId: string) => {
         newSet.delete(postId);
         return newSet;
       });
+    }
+  };
+
+  const handleReport = async (postId: string) => {
+    if (!userId) {
+      Alert.alert("Error", "You must be logged in to report a post.");
+      return;
+    }
+
+    if (!reportReason) {
+      Alert.alert("Error", "Please select a reason for reporting.");
+      return;
+    }
+
+    const selectedPost = posts.find((post) => post.id === postId);
+    if (!selectedPost) {
+      Alert.alert("Error", "Post not found.");
+      return;
+    }
+
+    const reportData = {
+      type: "POST",
+      post_id: postId,
+      reported_by: userId,
+      reported_profile_id: selectedPost.user_id,
+      reason: reportReason,
+      details: reportDetails || null,
+      status: "pending",
+    };
+
+    try {
+      const { error } = await supabase.from("reports").insert(reportData);
+      if (error) throw error;
+      Alert.alert("Success", "Post reported successfully.");
+    } catch (error) {
+      console.error("Error reporting post:", error);
+      Alert.alert("Error", "Failed to report post. Please try again.");
+    } finally {
+      setMenuVisible(false);
+      setSelectedPostId(null);
+      setReportReason("");
+      setReportDetails("");
     }
   };
 
@@ -272,6 +347,15 @@ const fetchFeed = async (currentUserId: string) => {
           </Text>
           <Text style={styles.username}>@{item.profile?.username}</Text>
         </View>
+
+        <TouchableOpacity
+          onPress={() => {
+            setSelectedPostId(item.id);
+            setMenuVisible(true);
+          }}
+        >
+          <Ionicons name="ellipsis-vertical" size={24} color="#666" />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.challengeBadge}>
@@ -328,34 +412,143 @@ const fetchFeed = async (currentUserId: string) => {
           <Text style={styles.loadingText}>Loading proofs...</Text>
         </View>
       ) : (
-        <FlatList
-          data={posts}
-          keyExtractor={(item) => item.id}
-          renderItem={renderPost}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#007aff"
-            />
-          }
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No proofs yet!</Text>
-              <Text style={styles.emptySubtitle}>
-                When your friends post proofs, they'll appear here
-              </Text>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                onPress={() => router.push("/(stack)/goals/friends/explore")}
+        <>
+          <FlatList
+            data={posts}
+            keyExtractor={(item) => item.id}
+            renderItem={renderPost}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#007aff"
+              />
+            }
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyTitle}>No proofs yet!</Text>
+                <Text style={styles.emptySubtitle}>
+                  When your friends post proofs, they'll appear here
+                </Text>
+                <TouchableOpacity
+                  style={styles.primaryButton}
+                  onPress={() => router.push("/(stack)/goals/friends/explore")}
+                >
+                  <Text style={styles.primaryButtonText}>Find Friends</Text>
+                </TouchableOpacity>
+              </View>
+            }
+          />
+          <Modal
+            visible={menuVisible}
+            transparent={true}
+            animationType="slide"
+            onRequestClose={() => {
+              setMenuVisible(false);
+              setReportReason("");
+              setReportDetails("");
+              Keyboard.dismiss();
+            }}
+          >
+            <TouchableOpacity
+              style={styles.modalOverlay}
+              onPress={() => {
+                Keyboard.dismiss();
+              }}
+              activeOpacity={1}
+            >
+              <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                keyboardVerticalOffset={Platform.OS === "ios" ? -375 : 0}
+                style={styles.keyboardAvoidingContainer}
               >
-                <Text style={styles.primaryButtonText}>Find Friends</Text>
-              </TouchableOpacity>
-            </View>
-          }
-        />
+                <View
+                  style={[
+                    styles.menuContainer,
+                    { transform: [{ translateY: -keyboardOffset }] },
+                  ]}
+                >
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      Keyboard.dismiss();
+                    }}
+                  >
+                    <Text style={styles.menuTitle}>Report Post</Text>
+                    <Text style={styles.menuSubtitle}>
+                      Reason for reporting
+                    </Text>
+                    <View style={styles.reasonContainer}>
+                      {reportReasons.map((reason) => (
+                        <TouchableOpacity
+                          key={reason}
+                          style={[
+                            styles.reasonButton,
+                            reportReason === reason &&
+                              styles.reasonButtonSelected,
+                          ]}
+                          onPress={() => setReportReason(reason)}
+                        >
+                          <Text
+                            style={[
+                              styles.reasonButtonText,
+                              reportReason === reason &&
+                                styles.reasonButtonTextSelected,
+                            ]}
+                          >
+                            {reason}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    <Text style={styles.menuSubtitle}>
+                      Additional details (optional)
+                    </Text>
+                    <TextInput
+                      style={styles.detailsInput}
+                      placeholder="Enter details..."
+                      value={reportDetails}
+                      onChangeText={setReportDetails}
+                      multiline
+                      textAlignVertical="top"
+                    />
+                    <View style={styles.buttonContainer}>
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.cancelButton]}
+                        onPress={() => {
+                          setMenuVisible(false);
+                          setReportReason("");
+                          setReportDetails("");
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <Text style={styles.actionButtonText}>Cancel</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.actionButton,
+                          styles.submitButton,
+                          !reportReason && styles.submitButtonDisabled,
+                        ]}
+                        onPress={() =>
+                          selectedPostId && handleReport(selectedPostId)
+                        }
+                        disabled={!reportReason}
+                      >
+                        <Text style={styles.actionButtonText}>
+                          Submit Report
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </KeyboardAvoidingView>
+            </TouchableOpacity>
+          </Modal>
+        </>
       )}
     </View>
   );
@@ -528,6 +721,93 @@ const styles = StyleSheet.create({
     maxWidth: 200,
   },
   primaryButtonText: {
+    color: "#ffffff",
+    fontWeight: "600",
+    fontSize: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "flex-end",
+  },
+  keyboardAvoidingContainer: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  menuContainer: {
+    backgroundColor: "#ffffff",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    marginBottom: 0,
+  },
+  menuTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#1a1a1a",
+    marginBottom: 12,
+  },
+  menuSubtitle: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#666",
+    marginBottom: 8,
+  },
+  reasonContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 16,
+  },
+  reasonButton: {
+    backgroundColor: "#f0f0f0",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  reasonButtonSelected: {
+    backgroundColor: "#007aff",
+  },
+  reasonButtonText: {
+    fontSize: 14,
+    color: "#333",
+  },
+  reasonButtonTextSelected: {
+    color: "#ffffff",
+  },
+  detailsInput: {
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: "#333",
+    marginBottom: 16,
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  actionButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+    marginHorizontal: 4,
+  },
+  cancelButton: {
+    backgroundColor: "#f0f0f0",
+  },
+  submitButton: {
+    backgroundColor: "#007aff",
+  },
+  submitButtonDisabled: {
+    backgroundColor: "#cccccc",
+  },
+  actionButtonText: {
     color: "#ffffff",
     fontWeight: "600",
     fontSize: 16,
