@@ -1,4 +1,3 @@
-import Fuse from "fuse.js"
 import { supabase } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
