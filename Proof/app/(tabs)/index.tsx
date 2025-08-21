@@ -38,6 +38,146 @@ interface Post {
   userHasLiked?: boolean;
 }
 
+type UserProfile = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  username: string;
+  longest_streak?: number;
+  goals_completed?: number;
+  total_goals?: number;
+  goal_completion_rate?: number;
+};
+
+type UserStats = {
+  goalsCompleted: number;
+  longestStreak: number;
+  completionRate: number;
+  totalGoals: number;
+};
+
+type ViewProfilePopupProps = {
+  userId: string;
+  visible: boolean;
+  onClose: () => void;
+};
+
+const ViewProfilePopup = ({ userId, visible, onClose }: ViewProfilePopupProps) => {
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [stats, setStats] = useState<UserStats>({
+    goalsCompleted: 0,
+    longestStreak: 0,
+    completionRate: 0,
+    totalGoals: 0,
+  });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUserData = async () => {
+      if (!visible || !userId) return;
+      setLoading(true);
+      try {
+        const { data: profileData, error: profileError } = await supabase
+          .from("profile")
+          .select("id, first_name, last_name, username, longest_streak, goals_completed, goal_completion_rate")
+          .eq("id", userId)
+          .single();
+
+        if (profileError) throw profileError;
+
+        const { count: totalChallenges, error: challengesError } = await supabase
+          .from("challenges")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", userId);
+
+        if (challengesError) throw challengesError;
+
+        const totalGoals = totalChallenges || 0;
+        const goalsCompleted = profileData.goals_completed || 0;
+        const completionRate =
+          totalGoals > 0 ? Math.round((goalsCompleted / totalGoals) * 100) : 0;
+
+        setUser(profileData);
+        setStats({
+          goalsCompleted,
+          longestStreak: profileData.longest_streak || 0,
+          completionRate,
+          totalGoals,
+        });
+      } catch (error) {
+        console.error("Error fetching user profile:", error);
+        Alert.alert("Error", "Failed to load user profile.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUserData();
+  }, [userId, visible]);
+
+  if (!user && !loading) return null;
+
+  const initials = `${user?.first_name?.[0] || ""}${user?.last_name?.[0] || ""}`.toUpperCase();
+
+  return (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={visible}
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#3b82f6" />
+            </View>
+          ) : (
+            <>
+              <View style={styles.profileHeader}>
+                <View style={styles.popupAvatarContainer}>
+                  <Text style={styles.popupAvatarText}>{initials}</Text>
+                </View>
+                <Text style={styles.name}>
+                  {user?.first_name} {user?.last_name}
+                </Text>
+                <Text style={styles.popupUsername}>@{user?.username}</Text>
+              </View>
+
+              <View style={styles.statsContainer}>
+                <View style={styles.statRow}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{stats.longestStreak}</Text>
+                    <Text style={styles.statLabel}>Longest Streak</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{stats.completionRate}%</Text>
+                    <Text style={styles.statLabel}>Completion Rate</Text>
+                  </View>
+                </View>
+                <View style={styles.statRow}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{stats.goalsCompleted}</Text>
+                    <Text style={styles.statLabel}>Goals Completed</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statNumber}>{stats.totalGoals}</Text>
+                    <Text style={styles.statLabel}>Total Goals</Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function HomeFeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,6 +189,8 @@ export default function HomeFeedScreen() {
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [profilePopupVisible, setProfilePopupVisible] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const router = useRouter();
 
   const reportReasons = [
@@ -62,7 +204,6 @@ export default function HomeFeedScreen() {
   useEffect(() => {
     loadUserAndData();
 
-    // Add keyboard event listeners
     const keyboardDidShowListener = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
       (event) => {
@@ -76,7 +217,6 @@ export default function HomeFeedScreen() {
       }
     );
 
-    // Cleanup listeners on unmount
     return () => {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
@@ -325,28 +465,41 @@ export default function HomeFeedScreen() {
     });
   };
 
+  const handleProfileClick = (userId: string) => {
+    setSelectedUserId(userId);
+    setProfilePopupVisible(true);
+  };
+
   const renderPost = ({ item }: { item: Post }) => (
     <View style={styles.postCard}>
       <View style={styles.postHeader}>
-        {item.profile?.profile_picture ? (
-          <Image
-            source={{ uri: item.profile.profile_picture }}
-            style={styles.avatar}
-          />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Text style={styles.avatarText}>
-              {getInitials(item.profile?.first_name, item.profile?.last_name)}
-            </Text>
-          </View>
-        )}
+        <TouchableOpacity
+          onPress={() => handleProfileClick(item.user_id)}
+          style={styles.avatarContainer}
+        >
+          {item.profile?.profile_picture ? (
+            <Image
+              source={{ uri: item.profile.profile_picture }}
+              style={styles.avatar}
+            />
+          ) : (
+            <View style={styles.avatarPlaceholder}>
+              <Text style={styles.avatarText}>
+                {getInitials(item.profile?.first_name, item.profile?.last_name)}
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
-        <View style={styles.userInfo}>
+        <TouchableOpacity
+          onPress={() => handleProfileClick(item.user_id)}
+          style={styles.userInfo}
+        >
           <Text style={styles.userName}>
             {item.profile?.first_name || ""} {item.profile?.last_name || ""}
           </Text>
           <Text style={styles.username}>@{item.profile?.username}</Text>
-        </View>
+        </TouchableOpacity>
 
         <TouchableOpacity
           onPress={() => {
@@ -548,6 +701,14 @@ export default function HomeFeedScreen() {
               </KeyboardAvoidingView>
             </TouchableOpacity>
           </Modal>
+          <ViewProfilePopup
+            userId={selectedUserId || ""}
+            visible={profilePopupVisible}
+            onClose={() => {
+              setProfilePopupVisible(false);
+              setSelectedUserId(null);
+            }}
+          />
         </>
       )}
     </View>
@@ -627,11 +788,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
+  avatarContainer: {
+    marginRight: 12,
+  },
   avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    marginRight: 12,
   },
   avatarPlaceholder: {
     width: 48,
@@ -640,7 +803,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#3b82f6",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 12,
   },
   avatarText: {
     color: "#ffffff",
@@ -811,5 +973,97 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontWeight: "600",
     fontSize: 16,
+  },
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    backgroundColor: "#f8fafc",
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 20,
+    marginVertical: 40,
+  },
+  profileHeader: {
+    alignItems: "center",
+    marginBottom: 32,
+  },
+  popupAvatarContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#3b82f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  popupAvatarText: {
+    fontSize: 48,
+    fontWeight: "bold",
+    color: "#fff",
+  },
+  name: {
+    fontSize: 28,
+    fontWeight: "700",
+    color: "#1e293b",
+    marginBottom: 4,
+  },
+  popupUsername: {
+    fontSize: 16,
+    color: "#64748b",
+    marginBottom: 8,
+  },
+  statsContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 32,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  statRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 8,
+  },
+  statNumber: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#3b82f6",
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 13,
+    color: "#64748b",
+    textAlign: "center",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  closeButton: {
+    backgroundColor: "#3b82f6",
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  closeButtonText: {
+    color: "white",
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
