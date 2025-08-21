@@ -1,4 +1,5 @@
 import { supabase } from '@/services/supabase';
+import { Filter } from 'bad-words';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
@@ -23,6 +24,9 @@ declare namespace JSX {
     [elemName: string]: any;
   }
 }
+
+// Initialize bad-words filter
+const filter = new Filter();
 
 // US States list with abbreviations like in ProfileScreen
 const US_STATES = [
@@ -344,16 +348,39 @@ export default function SignUpScreen() {
   );
 
   const handleSignUp = async () => {
+    // Check for required fields
     if (!username || !email || !password || !firstName || !lastName || !dob || !state) {
       Alert.alert('Validation Error', 'Please fill all required fields');
       return;
     }
 
+    // Check for agreement
     if (!agreed) {
       Alert.alert('Agreement Required', 'You must agree to the Terms of Service and Privacy Policy to create an account.');
       return;
     }
 
+    // Check for bad words in username, firstName, and lastName
+    try {
+      if (filter.isProfane(username)) {
+        Alert.alert('Validation Error', 'Username contains inappropriate words. Please choose a different username.');
+        return;
+      }
+      if (filter.isProfane(firstName)) {
+        Alert.alert('Validation Error', 'First name contains inappropriate words. Please enter a valid first name.');
+        return;
+      }
+      if (filter.isProfane(lastName)) {
+        Alert.alert('Validation Error', 'Last name contains inappropriate words. Please enter a valid last name.');
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking for bad words:', error);
+      Alert.alert('Error', 'Failed to validate input. Please try again.');
+      return;
+    }
+
+    // Validate date format
     if (dob.length !== 10) {
       Alert.alert('Invalid Date', 'Please enter a valid date in MM-DD-YYYY format.');
       return;
@@ -375,6 +402,7 @@ export default function SignUpScreen() {
       return;
     }
 
+    // Check age requirement
     const today = new Date(2025, 7, 9); // August 09, 2025
     let age = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
@@ -724,7 +752,6 @@ const styles = StyleSheet.create({
   nameInput: {
     flex: 1,
   },
-  // Custom dropdown styles
   dropdownContainer: {
     position: 'relative',
     zIndex: 1000,
