@@ -1,4 +1,5 @@
 import { supabase } from "@/services/supabase";
+import { Filter } from "bad-words";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -22,6 +23,8 @@ declare namespace JSX {
     [elemName: string]: any;
   }
 }
+
+const filter = new Filter();
 
 type UserProfile = {
   id: string;
@@ -114,30 +117,30 @@ const SettingsOverlay = ({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-const fetchPolicies = async () => {
-  setLoading(true);
-  try {
-    const privacyResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
-    );
-    const privacyText = await privacyResponse.text();
-    setPrivacyContent(privacyText);
+    const fetchPolicies = async () => {
+      setLoading(true);
+      try {
+        const privacyResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
+        );
+        const privacyText = await privacyResponse.text();
+        setPrivacyContent(privacyText);
 
-    const tosResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
-    );
-    const tosText = await tosResponse.text();
-    setTosContent(tosText);
-  } catch (error) {
-    console.error("Error fetching policies:", error);
-    Alert.alert(
-      "Error",
-      "Failed to load Privacy Policy or Terms of Service"
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+        const tosResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
+        );
+        const tosText = await tosResponse.text();
+        setTosContent(tosText);
+      } catch (error) {
+        console.error("Error fetching policies:", error);
+        Alert.alert(
+          "Error",
+          "Failed to load Privacy Policy or Terms of Service"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
     if (visible) {
       fetchPolicies();
@@ -312,11 +315,11 @@ const fetchPolicies = async () => {
       visible={visible}
       onRequestClose={onClose}
     >
-              <View style={styles.backButtonContainer}>
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.backButtonContainer}>
+        <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.settingsContainer}>
         <View style={styles.settingsHeader}>
           <Text style={styles.settingsTitle}>Settings</Text>
@@ -554,6 +557,19 @@ export default function ProfileScreen() {
     try {
       if (!tempData.first_name || !tempData.last_name || !tempData.username) {
         Alert.alert("Validation Error", "Please fill all required fields");
+        return;
+      }
+
+      // Check for bad words in first_name, last_name, and username
+      if (
+        filter.isProfane(tempData.first_name) ||
+        filter.isProfane(tempData.last_name) ||
+        filter.isProfane(tempData.username)
+      ) {
+        Alert.alert(
+          "Validation Error",
+          "Inappropriate words detected in profile fields"
+        );
         return;
       }
 
@@ -951,7 +967,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   settingsHeader: {
-    marginTop:0,
+    marginTop: 0,
     marginBottom: 24, // Reduced margin to adjust spacing
     alignItems: "center", // Center the header content
   },
