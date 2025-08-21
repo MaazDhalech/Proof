@@ -25,23 +25,12 @@ type Goal = {
   created_at: string;
 };
 
-type Friend = {
-  id: string;
-  name: string;
-  username: string;
-  friendshipId: string;
-  challenges: Goal[];
-};
-
 export default function GoalsPage() {
   const router = useRouter();
   const { expoPushToken, notification } = usePushNotifications();
-
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [friends, setFriends] = useState<Friend[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<"your" | "friends">("your");
   const [userId, setUserId] = useState<string | undefined>();
 
   useEffect(() => {
@@ -51,7 +40,8 @@ export default function GoalsPage() {
     };
     getCurrentUser();
     loadUserAndData();
-  }, [tab]);
+    // run once on mount
+  }, []);
 
   const loadUserAndData = async () => {
     setLoading(true);
@@ -70,11 +60,7 @@ export default function GoalsPage() {
     setUserId(currentUserId);
 
     if (currentUserId) {
-      if (tab === "your") {
-        await fetchGoals(currentUserId);
-      } else {
-        await fetchFriendsWithGoals(currentUserId);
-      }
+      await fetchGoals(currentUserId);
     } else {
       console.warn('No authenticated user found.');
     }
@@ -96,84 +82,10 @@ export default function GoalsPage() {
     }
   };
 
-  const fetchFriendsWithGoals = async (uid: string) => {
-    try {
-      // First, fetch friends
-      const { data: friendsData, error: friendsError } = await supabase
-        .from('friendships')
-        .select(`
-          id,
-          user_id,
-          friend_id,
-          sender:profile!friendships_user_id_fkey (
-            id,
-            username,
-            first_name,
-            last_name
-          ),
-          receiver:profile!friendships_friend_id_fkey (
-            id,
-            username,
-            first_name,
-            last_name
-          )
-        `)
-        .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
-        .eq('status', 'accepted');
-
-      if (friendsError) throw friendsError;
-
-      // Get friend IDs
-      const friendIds = friendsData.map((item: any) => {
-        const isUserSender = item.user_id === uid;
-        const profile = isUserSender ? item.receiver : item.sender;
-        return profile.id;
-      });
-
-      // Fetch challenges for all friends
-      let challengesData: any[] = [];
-      if (friendIds.length > 0) {
-        const { data, error: challengesError } = await supabase
-          .from('challenges')
-          .select('*')
-          .in('user_id', friendIds);
-
-        if (challengesError) throw challengesError;
-        challengesData = data || [];
-      }
-
-      // Combine friends with their challenges
-      const formatted: Friend[] = friendsData.map((item: any) => {
-        const isUserSender = item.user_id === uid;
-        const profile = isUserSender ? item.receiver : item.sender;
-        
-        const friendChallenges = challengesData.filter(
-          (challenge) => challenge.user_id === profile.id
-        );
-
-        return {
-          id: profile.id,
-          name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
-          username: profile?.username ?? '',
-          friendshipId: item.id,
-          challenges: friendChallenges,
-        };
-      });
-
-      setFriends(formatted);
-    } catch (err) {
-      console.error("Error in fetchFriendsWithGoals:", err);
-    }
-  };
-
   const onRefresh = async () => {
     if (!userId) return;
     setRefreshing(true);
-    if (tab === "your") {
-      await fetchGoals(userId);
-    } else {
-      await fetchFriendsWithGoals(userId);
-    }
+    await fetchGoals(userId);
     setRefreshing(false);
   };
 
@@ -263,12 +175,6 @@ export default function GoalsPage() {
       day: "numeric",
       year: "numeric",
     });
-  };
-
-  const getInitials = (firstName: string | null, lastName: string | null) => {
-    const first = firstName?.charAt(0) || '';
-    const last = lastName?.charAt(0) || '';
-    return `${first}${last}`.toUpperCase();
   };
 
   const getStreakEmoji = (streak: number) => {
@@ -376,112 +282,12 @@ export default function GoalsPage() {
     );
   };
 
-  const renderFriendGoal = ({ item }: { item: Goal }, friendName: string) => {
-    const progress = calculateProgress(item);
-    
-    return (
-      <View style={styles.challengeCard}>
-        <View style={styles.challengeHeader}>
-          <Text style={styles.challengeName}>{item.name}</Text>
-          {progress.isComplete && (
-            <View style={styles.completedBadge}>
-              <Text style={styles.completedText}>✓</Text>
-            </View>
-          )}
-        </View>
-        
-        
-        {item.description && (
-          <Text style={styles.challengeDescription}>{item.description}</Text>
-        )}
-
-        <View style={styles.progressSection}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressLabel}>Progress</Text>
-            <Text style={styles.progressStats}>
-              {progress.daysCompleted}/{progress.totalDays} days (
-              {Math.round(progress.progressPercentage)}%)
-            </Text>
-          </View>
-
-          <View style={styles.progressBarContainer}>
-            <View
-              style={[
-                styles.progressBar,
-                {
-                  width: `${progress.progressPercentage}%`,
-                  backgroundColor: progress.isComplete ? "#4CAF50" : "#007aff",
-                },
-              ]}
-            />
-          </View>
-        </View>
-
-        <View style={styles.challengeStats}>
-          <View style={styles.streakBadge}>
-            <Text style={styles.streakEmoji}>{getStreakEmoji(item.current_streak)}</Text>
-            <Text style={styles.streakText}>Streak: {item.current_streak}</Text>
-          </View>
-          
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Frequency</Text>
-            <Text style={styles.statValue}>{item.frequency}x</Text>
-          </View>
-        </View>
-
-        {item.end_date && (
-          <Text style={styles.dateText}>
-            Ends {formatDate(item.end_date)}
-          </Text>
-        )}
-      </View>
-    );
-  };
-
-  const renderFriend = ({ item }: { item: Friend }) => (
-    <View style={styles.friendCard}>
-      <View style={styles.friendInfo}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{getInitials(item.name.split(' ')[0], item.name.split(' ')[1])}</Text>
-        </View>
-        <View style={styles.friendDetails}>
-          <Text style={styles.friendName}>{item.name}</Text>
-          <Text style={styles.friendUsername}>@{item.username}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.goalsSection}>
-        <View style={styles.goalsSectionHeader}>
-          <Text style={styles.goalsSectionTitle}>Active Goals</Text>
-          <View style={styles.goalsCountBadge}>
-            <Text style={styles.goalsCountText}>{item.challenges.length}</Text>
-          </View>
-        </View>
-        
-        {item.challenges.length > 0 ? (
-          <FlatList
-            horizontal
-            data={item.challenges}
-            renderItem={({ item }) => renderFriendGoal({ item }, item.name)}
-            keyExtractor={(item) => item.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.challengesContent}
-          />
-        ) : (
-          <View style={styles.noGoalsContainer}>
-            <Text style={styles.noGoalsText}>No active goals yet</Text>
-          </View>
-        )}
-      </View>
-    </View>
-  );
-
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007aff" />
         <Text style={styles.loadingText}>
-          {tab === "your" ? "Loading your goals..." : "Loading friends goals..."}
+          Loading your goals...
         </Text>
       </View>
     );
@@ -491,76 +297,35 @@ export default function GoalsPage() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.heading}>Goals</Text>
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tab, tab === "your" && styles.activeTab]}
-            onPress={() => setTab("your")}
-          >
-            <Text style={[styles.tabText, tab === "your" && styles.activeTabText]}>
-              Your Goals
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, tab === "friends" && styles.activeTab]}
-            onPress={() => setTab("friends")}
-          >
-            <Text style={[styles.tabText, tab === "friends" && styles.activeTabText]}>
-              Friends
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
-      {tab === "your" ? (
-        <FlatList
-          data={goals}
-          keyExtractor={(item) => item.id}
-          renderItem={renderGoal}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No goals yet!</Text>
-              <Text style={styles.emptySubtitle}>
-                Create your first goal to get started
-              </Text>
-            </View>
-          }
-        />
-      ) : (
-        <FlatList
-          data={friends}
-          keyExtractor={(item) => item.friendshipId}
-          renderItem={renderFriend}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyTitle}>No friends yet!</Text>
-              <Text style={styles.emptySubtitle}>
-                Add friends to see their goals here
-              </Text>
-            </View>
-          }
-        />
-      )}
+      <FlatList
+        data={goals}
+        keyExtractor={(item) => item.id}
+        renderItem={renderGoal}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyTitle}>No goals yet!</Text>
+            <Text style={styles.emptySubtitle}>
+              Create your first goal to get started
+            </Text>
+          </View>
+        }
+      />
 
-      {tab === "your" && (
-        <View style={styles.buttonGroup}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => router.push("/goals/create")}
-          >
-            <Text style={styles.primaryButtonText}>Create New Goal</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <View style={styles.buttonGroup}>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={() => router.push("/goals/create")}
+        >
+          <Text style={styles.primaryButtonText}>Create New Goal</Text>
+        </TouchableOpacity>
+      </View>
 
     </View>
   );
@@ -587,37 +352,6 @@ const styles = StyleSheet.create({
     marginTop: 70,
     marginBottom: 16,
     color: '#1a1a1a',
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 8,
-    backgroundColor: '#f0f4f8',
-    borderRadius: 12,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  activeTab: {
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  tabText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#666',
-  },
-  activeTabText: {
-    color: '#007aff',
-    fontWeight: '600',
   },
   listContent: {
     padding: 16,
@@ -834,7 +568,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
-  // Friend card styles
+  // Friend-related styles left in place (harmless)...
   friendCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
