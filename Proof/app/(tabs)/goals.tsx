@@ -8,7 +8,8 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  Alert,
 } from "react-native";
 
 type Goal = {
@@ -31,10 +32,13 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | undefined>();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       const currentUserId = user?.id;
       setUserId(currentUserId);
       if (currentUserId) {
@@ -69,6 +73,33 @@ export default function GoalsPage() {
     setRefreshing(false);
   };
 
+  const deleteGoal = async (goalId: string) => {
+    try {
+      setDeletingId(goalId);
+
+      // If you have child rows (e.g., proof) and no FK CASCADE, delete them first here:
+      // await supabase.from('proof').delete().eq('challenge_id', goalId);
+
+      const { error } = await supabase.from("challenges").delete().eq("id", goalId);
+      if (error) throw error;
+
+      // Optimistic UI update
+      setGoals((prev) => prev.filter((g) => g.id !== goalId));
+    } catch (e) {
+      console.error("Delete failed:", e);
+      Alert.alert("Delete failed", "Couldn’t delete the goal. Please try again.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const confirmDelete = (goalId: string, name: string) => {
+    Alert.alert("Delete goal?", `This will permanently delete “${name}”.`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => deleteGoal(goalId) },
+    ]);
+  };
+
   const calculateProgress = (goal: Goal) => {
     const startDate = new Date(goal.start_date);
     const endDate = new Date(goal.end_date);
@@ -81,12 +112,7 @@ export default function GoalsPage() {
     const progressPercentage = Math.min(100, (daysCompleted / totalDays) * 100);
     const isComplete = today > endDate;
 
-    return {
-      daysCompleted,
-      totalDays,
-      progressPercentage,
-      isComplete,
-    };
+    return { daysCompleted, totalDays, progressPercentage, isComplete };
   };
 
   const getCheckInStatus = (goal: Goal) => {
@@ -171,16 +197,35 @@ export default function GoalsPage() {
 
     return (
       <View style={styles.goalCard}>
+        {/* Title row with right-aligned badges */}
         <View style={styles.goalHeader}>
           <Text style={styles.goalName}>{item.name}</Text>
-          {progress.isComplete && (
-            <View style={styles.completedBadge}>
-              <Text style={styles.completedText}>✓</Text>
-            </View>
-          )}
+
+          <View style={styles.headerRight}>
+            {/* Show completed badge only when complete */}
+            {progress.isComplete && (
+              <View style={styles.completedBadge}>
+                <Text style={styles.completedText}>✓</Text>
+              </View>
+            )}
+
+            {/* Delete pill always visible */}
+            <TouchableOpacity
+              style={styles.deletePill}
+              onPress={() => confirmDelete(item.id, item.name)}
+              disabled={deletingId === item.id}
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            >
+              {deletingId === item.id ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.deletePillText}>Delete</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {item.description && (
+        {!!item.description && (
           <Text style={styles.goalDescription}>{item.description}</Text>
         )}
 
@@ -219,7 +264,9 @@ export default function GoalsPage() {
 
         <View style={styles.goalStats}>
           <View style={styles.streakBadge}>
-            <Text style={styles.streakEmoji}>{getStreakEmoji(item.current_streak)}</Text>
+            <Text style={styles.streakEmoji}>
+              {getStreakEmoji(item.current_streak)}
+            </Text>
             <Text style={styles.streakText}>Streak: {item.current_streak}</Text>
           </View>
 
@@ -229,10 +276,12 @@ export default function GoalsPage() {
           </View>
         </View>
 
+        {/* Full-width primary CTA */}
         <TouchableOpacity
           style={[
-            styles.checkInButton,
-            (!checkInStatus.canCheckIn || progress.isComplete) && styles.disabledButton,
+            styles.checkInFull,
+            (!checkInStatus.canCheckIn || progress.isComplete) &&
+              styles.disabledButton,
             checkInStatus.status === "streak-reset" && styles.warningButton,
           ]}
           onPress={() => {
@@ -254,7 +303,8 @@ export default function GoalsPage() {
           <Text
             style={[
               styles.checkInText,
-              (!checkInStatus.canCheckIn || progress.isComplete) && styles.disabledButtonText,
+              (!checkInStatus.canCheckIn || progress.isComplete) &&
+                styles.disabledButtonText,
             ]}
           >
             {progress.isComplete ? "Completed" : checkInStatus.message}
@@ -326,10 +376,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     color: "#1a1a1a",
   },
-  listContent: {
-    padding: 16,
-    paddingBottom: 140,
-  },
+  listContent: { padding: 16, paddingBottom: 140 },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 12, fontSize: 16, color: "#666" },
   emptyContainer: {
@@ -360,7 +407,37 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     marginBottom: 8,
   },
-  goalName: { fontSize: 18, fontWeight: "600", color: "#1a1a1a", flex: 1 },
+  goalName: { fontSize: 18, fontWeight: "600", color: "#1a1a1a", flexShrink: 1 },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8,
+  },
+
+  // Completed badge (kept small to fit alongside Delete)
+  completedBadge: {
+    backgroundColor: "#4CAF50",
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  completedText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
+
+  // Delete pill (inline, not absolute)
+  deletePill: {
+    backgroundColor: "#dc3545",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    minWidth: 64,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deletePillText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+
   goalDescription: { fontSize: 14, color: "#666", marginBottom: 12, lineHeight: 20 },
 
   dateSection: { marginBottom: 12 },
@@ -395,39 +472,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#f59e0b",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
-  streakEmoji: { fontSize: 12, marginRight: 4 },
+  streakEmoji: { fontSize: 12, marginRight: 6 },
   streakText: { fontSize: 13, fontWeight: "600", color: "#ffffff" },
   statItem: { alignItems: "flex-end" },
   statLabel: { fontSize: 12, color: "#666", fontWeight: "500" },
   statValue: { fontSize: 14, color: "#1a1a1a", fontWeight: "600" },
 
-  checkInButton: {
+  /* ---------- Primary CTA ---------- */
+  checkInFull: {
     backgroundColor: "#007aff",
-    padding: 12,
-    borderRadius: 8,
+    minHeight: 48,
+    borderRadius: 12,
     alignItems: "center",
-    marginTop: 8,
+    justifyContent: "center",
+    marginTop: 12,
   },
-  checkInText: { color: "#ffffff", fontWeight: "600", fontSize: 16 },
+  checkInText: { color: "#fff", fontWeight: "700", fontSize: 16 },
+
+  /* Disabled & warning variants */
   disabledButton: { backgroundColor: "#e9ecef" },
   disabledButtonText: { color: "#999" },
   warningButton: { backgroundColor: "#ff9500" },
 
-  completedBadge: {
-    backgroundColor: "#4CAF50",
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    marginLeft: 8,
-  },
-  completedText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
-
+  /* Footer CTA */
   buttonGroup: {
     position: "absolute",
     bottom: 0,
