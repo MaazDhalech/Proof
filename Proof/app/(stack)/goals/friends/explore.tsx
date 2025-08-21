@@ -1,7 +1,8 @@
 import { supabase } from '@/services/supabase';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   StyleSheet,
   Text,
@@ -10,10 +11,13 @@ import {
   View,
 } from 'react-native';
 
+type PendingKind = 'outgoing' | 'incoming' | null;
+
 type User = {
   id: string;
   name: string;
   username: string;
+  pending: PendingKind; // you->them or them->you
 };
 
 export default function ExploreFriendsScreen() {
@@ -21,6 +25,7 @@ export default function ExploreFriendsScreen() {
   const [searchText, setSearchText] = useState('');
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [workingId, setWorkingId] = useState<string | null>(null); // disable button while mutating
 
   useEffect(() => {
     const init = async () => {
@@ -29,286 +34,289 @@ export default function ExploreFriendsScreen() {
       } = await supabase.auth.getSession();
       const uid = session?.user?.id ?? null;
       setCurrentUserId(uid);
-
-      if (uid) await fetchUsersNotFriends(uid);
+      if (uid) await fetchUsersNotFriendsOrPending(uid);
     };
-
     init();
   }, []);
 
-  const fetchUsersNotFriends = async (uid: string) => {
-    const { data: existingRelations, error } = await supabase
+  // Include users who are NOT accepted friends.
+  // People with pending (either direction) are INCLUDED and tagged.
+  const fetchUsersNotFriendsOrPending = async (uid: string) => {
+    // ACCEPTED (to EXCLUDE later)
+    const { data: acceptedRels, error: accErr } = await supabase
       .from('friendships')
-      .select('friend_id')
-      .eq('user_id', uid);
-
-    if (error) {
-      console.error('Error fetching friendships:', error);
+      .select('user_id, friend_id')
+      .or(
+        `and(user_id.eq.${uid},status.eq.accepted),and(friend_id.eq.${uid},status.eq.accepted)`
+      );
+    if (accErr) {
+      console.error('ACCEPTED fetch error:', accErr);
       return;
     }
+    const acceptedSet = new Set<string>(
+      (acceptedRels ?? []).map(r => (r.user_id === uid ? r.friend_id : r.user_id))
+    );
 
-    const friendIds = existingRelations?.map((f) => f.friend_id) || [];
-    const excludedIds = [...friendIds, uid];
+    // PENDING (to TAG)
+    const { data: pendingRels, error: pendErr } = await supabase
+      .from('friendships')
+      .select('user_id, friend_id')
+      .or(
+        `and(user_id.eq.${uid},status.eq.pending),and(friend_id.eq.${uid},status.eq.pending)`
+      );
+    if (pendErr) {
+      console.error('PENDING fetch error:', pendErr);
+      return;
+    }
+    const pendingMap = new Map<string, PendingKind>();
+    for (const r of pendingRels ?? []) {
+      const other = r.user_id === uid ? r.friend_id : r.user_id;
+      const dir: PendingKind = r.user_id === uid ? 'outgoing' : 'incoming';
+      pendingMap.set(other, dir);
+    }
 
-    const formattedList = `(${excludedIds.map((id) => `"${id}"`).join(',')})`;
-
-    const { data: profiles, error: userError } = await supabase
-      .from('profile')
+    // PROFILES (filter client-side to keep pending)
+    const { data: profiles, error: profErr } = await supabase
+      .from('profile') // singular in your schema
       .select('id, username, first_name, last_name')
-      .not('id', 'in', formattedList);
-
-    if (userError) {
-      console.error('Error fetching profiles:', userError);
+      .neq('id', uid);
+    if (profErr) {
+      console.error('PROFILES fetch error:', profErr);
       return;
     }
 
-    const formatted = profiles.map((user) => ({
-      id: user.id,
-      username: user.username,
-      name: `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim(),
-    }));
+    const formatted: User[] = (profiles ?? [])
+      .filter(u => !acceptedSet.has(u.id)) // hide accepted
+      .map(u => ({
+        id: u.id as string,
+        username: u.username as string,
+        name: `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+        pending: pendingMap.get(u.id) ?? null,
+      }));
 
     setAllUsers(formatted);
   };
 
-  const sendFriendRequest = async (friendId: string) => {
+  // Toggle: send if none, open "Respond" if incoming, cancel if outgoing
+  const toggleRequest = async (otherId: string) => {
     if (!currentUserId) return;
+    const row = allUsers.find(u => u.id === otherId);
+    if (!row) return;
 
-    const { error } = await supabase.from('friendships').insert([
-      {
-        user_id: currentUserId,
-        friend_id: friendId,
-        status: 'pending',
-      },
-    ]);
+    try {
+      setWorkingId(otherId);
 
-    if (error) {
-      console.error('Error sending friend request:', error);
-    } else {
-      setAllUsers((prev) => prev.filter((u) => u.id !== friendId));
+      if (row.pending === 'incoming') {
+        // They requested you → take them to requests screen (or accept inline if you prefer)
+        router.push('/friends/requests');
+        return;
+      }
+
+      if (row.pending === 'outgoing') {
+        // CANCEL your pending request
+        // Optimistic UI: clear pending immediately
+        setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: null } : u)));
+
+        const { error } = await supabase
+          .from('friendships')
+          .delete()
+          .eq('user_id', currentUserId)
+          .eq('friend_id', otherId)
+          .eq('status', 'pending');
+
+        if (error) {
+          // revert on failure
+          setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: 'outgoing' } : u)));
+          console.error('Cancel request error:', error);
+          Alert.alert('Could not cancel request', error.message ?? 'Unknown error');
+        }
+        return;
+      }
+
+      // No relation → SEND request
+      setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: 'outgoing' } : u)));
+
+      const { error } = await supabase.from('friendships').insert([
+        { user_id: currentUserId, friend_id: otherId, status: 'pending' },
+      ]);
+
+      if (error) {
+        // Unique violation or other error → revert
+        setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: null } : u)));
+        console.error('Send request error:', error);
+        Alert.alert('Could not send request', error.message ?? 'Unknown error');
+      }
+    } finally {
+      setWorkingId(null);
     }
   };
 
-  // Robust fuzzy search with multi-word support
-  function fuzzyScore(text, search) {
+  // --- Fuzzy search (unchanged) ---
+  function fuzzyScore(text: string, search: string) {
     if (!search) return 1;
     if (!text) return 0;
-    
+
     const textLower = text.toLowerCase();
     const searchLower = search.toLowerCase();
     const cleanText = textLower.replace(/[\s\-_.]+/g, '');
-    const cleanSearch = searchLower.replace(/[\s\-_.]+/g, '');
-    
-    // Split search into multiple words
-    const searchWords = searchLower.trim().split(/[\s]+/).filter(word => word.length > 0);
-    
-    // Handle multi-word searches
+    const searchWords = searchLower.trim().split(/[\s]+/).filter(Boolean);
+
     if (searchWords.length > 1) {
       let totalScore = 0;
       let wordsMatched = 0;
-      
-      for (const searchWord of searchWords) {
-        const wordScore = fuzzyScore(text, searchWord); // Recursive call for each word
-        if (wordScore > 0) {
-          totalScore += wordScore;
+      for (const w of searchWords) {
+        const s = fuzzyScore(text, w);
+        if (s > 0) {
+          totalScore += s;
           wordsMatched++;
         }
       }
-      
-      // Only return a score if most words matched
-      if (wordsMatched >= Math.ceil(searchWords.length * 0.7)) {
-        return totalScore / searchWords.length; // Average score
-      } else {
-        return 0;
-      }
+      return wordsMatched >= Math.ceil(searchWords.length * 0.7)
+        ? totalScore / searchWords.length
+        : 0;
     }
-    
-    // Single word search (original logic)
-    const singleSearch = searchWords[0] || searchLower;
-    
-    // Exact matches (highest priority)
-    if (textLower === singleSearch || cleanText === singleSearch.replace(/[\s\-_.]+/g, '')) return 100;
-    
-    // Substring matches (high priority)
-    if (textLower.includes(singleSearch)) return 90;
-    if (cleanText.includes(singleSearch.replace(/[\s\-_.]+/g, ''))) return 85;
-    
-    // Word boundary matches
+
+    const single = searchWords[0] || searchLower;
+    const cleanSingle = single.replace(/[\s\-_.]+/g, '');
+
+    if (textLower === single || cleanText === cleanSingle) return 100;
+    if (textLower.includes(single)) return 90;
+    if (cleanText.includes(cleanSingle)) return 85;
+
     const words = textLower.split(/[\s\-_.]+/);
-    for (const word of words) {
-      if (word.startsWith(singleSearch)) return 75;
-      if (word.includes(singleSearch)) return 60;
+    for (const w of words) {
+      if (w.startsWith(single)) return 75;
+      if (w.includes(single)) return 60;
     }
-    
-    // Simple edit distance for typo tolerance
-    function editDistance(str1, str2) {
-      if (Math.abs(str1.length - str2.length) > 3) return Infinity;
-      
-      const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
-      for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
-      for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
-      
-      for (let j = 1; j <= str2.length; j++) {
-        for (let i = 1; i <= str1.length; i++) {
-          const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-          matrix[j][i] = Math.min(
-            matrix[j][i - 1] + 1,
-            matrix[j - 1][i] + 1,
-            matrix[j - 1][i - 1] + cost
-          );
+
+    function editDistance(a: string, b: string) {
+      if (Math.abs(a.length - b.length) > 3) return Infinity;
+      const m = Array(b.length + 1)
+        .fill(null)
+        .map(() => Array(a.length + 1).fill(0));
+      for (let i = 0; i <= a.length; i++) m[0][i] = i;
+      for (let j = 0; j <= b.length; j++) m[j][0] = j;
+      for (let j = 1; j <= b.length; j++) {
+        for (let i = 1; i <= a.length; i++) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          m[j][i] = Math.min(m[j][i - 1] + 1, m[j - 1][i] + 1, m[j - 1][i - 1] + cost);
         }
       }
-      return matrix[str2.length][str1.length];
+      return m[b.length][a.length];
     }
-    
-    // Check for typos in words
-    if (singleSearch.length >= 3) {
-      for (const word of words) {
-        const distance = editDistance(word, singleSearch);
-        const maxAllowed = Math.floor(singleSearch.length / 3);
-        if (distance <= maxAllowed) {
-          return 50 - (distance * 10);
-        }
+
+    if (single.length >= 3) {
+      for (const w of words) {
+        const d = editDistance(w, single);
+        const max = Math.floor(single.length / 3);
+        if (d <= max) return 50 - d * 10;
       }
     }
-    
-    // Character sequence matching
-    let searchIndex = 0;
+
+    let idx = 0;
     let score = 0;
-    let consecutiveBonus = 1;
-    const cleanSingleSearch = singleSearch.replace(/[\s\-_.]+/g, '');
-    
-    for (let i = 0; i < cleanText.length && searchIndex < cleanSingleSearch.length; i++) {
-      if (cleanText[i] === cleanSingleSearch[searchIndex]) {
-        score += consecutiveBonus;
-        consecutiveBonus = Math.min(consecutiveBonus + 1, 5); // Max bonus of 5
-        searchIndex++;
+    let bonus = 1;
+    for (let i = 0; i < cleanText.length && idx < cleanSingle.length; i++) {
+      if (cleanText[i] === cleanSingle[idx]) {
+        score += bonus;
+        bonus = Math.min(bonus + 1, 5);
+        idx++;
       } else {
-        consecutiveBonus = 1;
+        bonus = 1;
       }
     }
-    
-    if (searchIndex === cleanSingleSearch.length) {
-      return Math.min(score, 40); // Cap at 40 for sequence matches
-    }
-    
-    return 0;
+    return idx === cleanSingle.length ? Math.min(score, 40) : 0;
   }
 
-  // Replace your filter with this:
-  const filteredUsers = searchText.trim() === '' ? [] // If the search text is empty, return an empty list
-    : allUsers
-      .map(user => ({
-        ...user,
-        score: Math.max(
-          fuzzyScore(user.name, searchText),
-          fuzzyScore(user.username, searchText)
-        )
+  const filteredUsers = useMemo(() => {
+    const q = searchText.trim();
+    if (!q) return [];
+    return allUsers
+      .map(u => ({
+        ...u,
+        score: Math.max(fuzzyScore(u.name, q), fuzzyScore(u.username, q)),
       }))
-      .filter(user => user.score > 0)
+      .filter(u => u.score > 0)
       .sort((a, b) => b.score - a.score);
+  }, [searchText, allUsers]);
 
-  const renderUser = ({ item }: { item: User }) => (
-    <View style={styles.card}>
-      <Text style={styles.name}>{item.name}</Text>
-      <Text style={styles.username}>@{item.username}</Text>
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => sendFriendRequest(item.id)}
-      >
-        <Text style={styles.buttonText}>Send Friend Request</Text>
-      </TouchableOpacity>
-    </View>
-  );
+  const renderUser = ({ item }: { item: User }) => {
+    const isOutgoing = item.pending === 'outgoing';
+    const isIncoming = item.pending === 'incoming';
+
+    // Labels + styles for each state
+    const label = isOutgoing ? 'Cancel Request' : isIncoming ? 'Respond' : 'Send Friend Request';
+    const style = [
+      styles.button,
+      isOutgoing && styles.buttonCancel,
+      isIncoming && styles.buttonRespond,
+      workingId === item.id && styles.buttonDisabled,
+    ];
+    const disabled = workingId === item.id;
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.name}>{item.name}</Text>
+        <Text style={styles.username}>@{item.username}</Text>
+
+        <TouchableOpacity
+          style={style}
+          disabled={disabled}
+          onPress={() => toggleRequest(item.id)}
+        >
+          <Text style={styles.buttonText}>{label}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
-  {/* Back Button with spacing */}
-  <View style={styles.backButtonWrapper}>
-    <TouchableOpacity onPress={() => router.push('/friends')} style={styles.backButton}>
-      <Text style={styles.backText}>← Back</Text>
-    </TouchableOpacity>
-  </View>
+      {/* Back Button with spacing */}
+      <View style={styles.backButtonWrapper}>
+        <TouchableOpacity onPress={() => router.push('/friends')} style={styles.backButton}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+      </View>
 
-  <Text style={styles.heading}>Explore New Friends</Text>
+      <Text style={styles.heading}>Explore New Friends</Text>
 
-  <TextInput
-    style={styles.searchInput}
-    placeholder="Search users..."
-    value={searchText}
-    onChangeText={setSearchText}
-  />
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search users..."
+        value={searchText}
+        onChangeText={setSearchText}
+      />
 
-  <FlatList
-    data={filteredUsers}
-    keyExtractor={(item) => item.id}
-    renderItem={renderUser}
-    contentContainerStyle={{ paddingBottom: 100 }}
-  />
-</View>
+      <FlatList
+        data={filteredUsers}
+        keyExtractor={(item) => item.id}
+        renderItem={renderUser}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      paddingTop: 60,
-      paddingHorizontal: 20,
-      backgroundColor: '#fff',
-    },
-    backButtonWrapper: {
-      marginBottom: 10,
-      marginTop: 10,
-    },
-    backButton: {
-      padding: 8,
-      alignSelf: 'flex-start',
-    },
-    backText: {
-      color: '#007aff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    heading: {
-      fontSize: 28,
-      fontWeight: 'bold',
-      marginBottom: 20,
-      color: '#111',
-    },
-    searchInput: {
-      height: 40,
-      borderColor: '#ccc',
-      borderWidth: 1,
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      marginBottom: 16,
-      backgroundColor: '#f9f9f9',
-    },
-    card: {
-      backgroundColor: '#f1f1f1',
-      padding: 16,
-      borderRadius: 10,
-      marginBottom: 12,
-    },
-    name: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: '#111',
-    },
-    username: {
-      fontSize: 14,
-      color: '#666',
-      marginTop: 4,
-    },
-    button: {
-      marginTop: 8,
-      backgroundColor: '#007aff',
-      padding: 10,
-      borderRadius: 6,
-      alignItems: 'center',
-    },
-    buttonText: {
-      color: '#fff',
-      fontWeight: '600',
-    },
-  });
+  container: { flex: 1, paddingTop: 60, paddingHorizontal: 20, backgroundColor: '#fff' },
+  backButtonWrapper: { marginBottom: 10, marginTop: 10 },
+  backButton: { padding: 8, alignSelf: 'flex-start' },
+  backText: { color: '#007aff', fontSize: 16, fontWeight: '600' },
+  heading: { fontSize: 28, fontWeight: 'bold', marginBottom: 20, color: '#111' },
+  searchInput: {
+    height: 40, borderColor: '#ccc', borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: 12, marginBottom: 16, backgroundColor: '#f9f9f9',
+  },
+  card: { backgroundColor: '#f1f1f1', padding: 16, borderRadius: 10, marginBottom: 12 },
+  name: { fontSize: 18, fontWeight: '600', color: '#111' },
+  username: { fontSize: 14, color: '#666', marginTop: 4 },
+  button: {
+    marginTop: 8, backgroundColor: '#007aff', padding: 10,
+    borderRadius: 6, alignItems: 'center',
+  },
+  buttonRespond: { backgroundColor: '#ffac33' },
+  buttonCancel: { backgroundColor: '#dc3545' },
+  buttonDisabled: { opacity: 0.6 },
+  buttonText: { color: '#fff', fontWeight: '600' },
+});
