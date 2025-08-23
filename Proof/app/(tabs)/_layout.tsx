@@ -67,6 +67,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="proofs"
+        options={{
+          title: 'Proofs',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="checkmark.seal.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="friends"
         options={{
           title: 'Friends',

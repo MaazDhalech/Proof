@@ -1,9 +1,12 @@
 import { supabase } from '@/services/supabase';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -13,6 +16,13 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+
+declare namespace JSX {
+  interface Element extends React.ReactElement<any, any> {}
+  interface IntrinsicElements {
+    [elemName: string]: any;
+  }
+}
 
 // US States list with abbreviations like in ProfileScreen
 const US_STATES = [
@@ -79,6 +89,13 @@ export default function SignUpScreen() {
   const [dob, setDob] = useState('');
   const [state, setState] = useState('');
   const [stateDropdownVisible, setStateDropdownVisible] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
+  const [tosModalVisible, setTosModalVisible] = useState(false);
+  const [privacyContent, setPrivacyContent] = useState<string>('');
+  const [tosContent, setTosContent] = useState<string>('');
+  const [loadingPrivacy, setLoadingPrivacy] = useState(false);
+  const [loadingTos, setLoadingTos] = useState(false);
 
   // Helper: capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
@@ -128,20 +145,249 @@ export default function SignUpScreen() {
     setStateDropdownVisible(false);
   };
 
+  useEffect(() => {
+    if (privacyModalVisible && !privacyContent) {
+      fetchPrivacy();
+    }
+  }, [privacyModalVisible]);
+
+  useEffect(() => {
+    if (tosModalVisible && !tosContent) {
+      fetchTos();
+    }
+  }, [tosModalVisible]);
+
+  const fetchPrivacy = async () => {
+    setLoadingPrivacy(true);
+    try {
+      const privacyResponse = await fetch(
+        "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
+      );
+      const privacyText = await privacyResponse.text();
+      setPrivacyContent(privacyText);
+    } catch (error) {
+      console.error("Error fetching privacy policy:", error);
+      Alert.alert("Error", "Failed to load Privacy Policy");
+    } finally {
+      setLoadingPrivacy(false);
+    }
+  };
+
+  const fetchTos = async () => {
+    setLoadingTos(true);
+    try {
+      const tosResponse = await fetch(
+        "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
+      );
+      const tosText = await tosResponse.text();
+      setTosContent(tosText);
+    } catch (error) {
+      console.error("Error fetching terms of service:", error);
+      Alert.alert("Error", "Failed to load Terms of Service");
+    } finally {
+      setLoadingTos(false);
+    }
+  };
+
+  const renderMarkdown = (content: string) => {
+    const lines = content.split("\n");
+    const elements: JSX.Element[] = [];
+    let currentList: JSX.Element[] = [];
+    let inList = false;
+
+    lines.forEach((line, index) => {
+      line = line.trim();
+      if (!line) return;
+
+      if (line.startsWith("# ")) {
+        if (inList && currentList.length > 0) {
+          elements.push(
+            <View key={`list-${index}`} style={styles.listContainer}>
+              {currentList}
+            </View>
+          );
+          currentList = [];
+          inList = false;
+        }
+        elements.push(
+          <Text key={index} style={styles.policyTitle}>
+            {line.replace("# ", "")}
+          </Text>
+        );
+      } else if (line.startsWith("## ")) {
+        if (inList && currentList.length > 0) {
+          elements.push(
+            <View key={`list-${index}`} style={styles.listContainer}>
+              {currentList}
+            </View>
+          );
+          currentList = [];
+          inList = false;
+        }
+        elements.push(
+          <Text key={index} style={styles.sectionTitle}>
+            {line.replace("## ", "")}
+          </Text>
+        );
+      } else if (line.startsWith("**") && line.endsWith("**")) {
+        if (inList && currentList.length > 0) {
+          elements.push(
+            <View key={`list-${index}`} style={styles.listContainer}>
+              {currentList}
+            </View>
+          );
+          currentList = [];
+          inList = false;
+        }
+        const text = line.replace(/\*\*/g, "");
+        elements.push(
+          <Text key={index} style={styles.policyText}>
+            {text.split(/(\[.*?\]\(.*?\))/g).map((part, i) => {
+              if (part.match(/\[.*?\]\(.*?\)/)) {
+                const linkText = part.match(/\[(.*?)\]/)?.[1];
+                const url = part.match(/\((.*?)\)/)?.[1];
+                return (
+                  <Text
+                    key={`link-${i}`}
+                    style={styles.link}
+                    onPress={() => url && Linking.openURL(url)}
+                  >
+                    {linkText}
+                  </Text>
+                );
+              }
+              return part;
+            })}
+          </Text>
+        );
+      } else if (line.startsWith("- ")) {
+        inList = true;
+        const text = line.replace("- ", "");
+        currentList.push(
+          <Text key={index} style={styles.listItem}>
+            {text.split(/(\[.*?\]\(.*?\))/g).map((part, i) => {
+              if (part.match(/\[.*?\]\(.*?\)/)) {
+                const linkText = part.match(/\[(.*?)\]/)?.[1];
+                const url = part.match(/\((.*?)\)/)?.[1];
+                return (
+                  <Text
+                    key={`link-${i}`}
+                    style={styles.link}
+                    onPress={() => url && Linking.openURL(url)}
+                  >
+                    {linkText}
+                  </Text>
+                );
+              }
+              return part.replace(/\*\*(.*?)\*\*/g, (_, p1) => p1);
+            })}
+          </Text>
+        );
+      } else {
+        if (inList && currentList.length > 0) {
+          elements.push(
+            <View key={`list-${index}`} style={styles.listContainer}>
+              {currentList}
+            </View>
+          );
+          currentList = [];
+          inList = false;
+        }
+        elements.push(
+          <Text key={index} style={styles.policyText}>
+            {line.split(/(\[.*?\]\(.*?\))/g).map((part, i) => {
+              if (part.match(/\[.*?\]\(.*?\)/)) {
+                const linkText = part.match(/\[(.*?)\]/)?.[1];
+                const url = part.match(/\((.*?)\)/)?.[1];
+                return (
+                  <Text
+                    key={`link-${i}`}
+                    style={styles.link}
+                    onPress={() => url && Linking.openURL(url)}
+                  >
+                    {linkText}
+                  </Text>
+                );
+              }
+              return part.replace(/\*\*(.*?)\*\*/g, (_, p1) => p1);
+            })}
+          </Text>
+        );
+      }
+    });
+
+    if (inList && currentList.length > 0) {
+      elements.push(
+        <View key="final-list" style={styles.listContainer}>
+          {currentList}
+        </View>
+      );
+    }
+
+    return elements;
+  };
+
+  const PrivacyPolicyContent = () => (
+    <ScrollView style={styles.policyScroll}>
+      {renderMarkdown(privacyContent)}
+    </ScrollView>
+  );
+
+  const TosContent = () => (
+    <ScrollView style={styles.policyScroll}>
+      {renderMarkdown(tosContent)}
+    </ScrollView>
+  );
+
   const handleSignUp = async () => {
     if (!username || !email || !password || !firstName || !lastName || !dob || !state) {
       Alert.alert('Validation Error', 'Please fill all required fields');
       return;
     }
 
-    const isoDob = toISODateFromMMDDYYYY(dob);
-    if (!isoDob) {
-      Alert.alert('Invalid Date', 'Please enter a valid date as MM-DD-YYYY');
+    if (!agreed) {
+      Alert.alert('Agreement Required', 'You must agree to the Terms of Service and Privacy Policy to create an account.');
+      return;
+    }
+
+    if (dob.length !== 10) {
+      Alert.alert('Invalid Date', 'Please enter a valid date in MM-DD-YYYY format.');
+      return;
+    }
+
+    const [monthStr, dayStr, yearStr] = dob.split('-');
+    const month = parseInt(monthStr, 10);
+    const day = parseInt(dayStr, 10);
+    const year = parseInt(yearStr, 10);
+
+    if (isNaN(month) || isNaN(day) || isNaN(year) || month < 1 || month > 12 || day < 1 || day > 31 || year < 1900 || year > 2025) {
+      Alert.alert('Invalid Date', 'Please enter a valid date in MM-DD-YYYY format.');
+      return;
+    }
+
+    const birthDate = new Date(year, month - 1, day);
+    if (isNaN(birthDate.getTime())) {
+      Alert.alert('Invalid Date', 'Please enter a valid date in MM-DD-YYYY format.');
+      return;
+    }
+
+    const today = new Date(2025, 7, 9); // August 09, 2025
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+
+    if (age < 13) {
+      Alert.alert('Age Requirement', 'You must be at least 13 years old to create an account.');
       return;
     }
 
     try {
-      // 1) Auth sign up
+      // Format DOB to YYYY-MM-DD for storage
+      const formattedDob = `${year}-${monthStr.padStart(2, '0')}-${dayStr.padStart(2, '0')}`;
+
+      // 1. Create auth user
       const { data: authData, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
@@ -178,8 +424,24 @@ export default function SignUpScreen() {
         };
 
         const { error: profileError } = await supabase
-          .from('profile') // table name is singular per your screenshot
-          .insert(payload);
+          .from('profile')
+          .insert({
+            id: authData.user.id,
+            username,
+            first_name: firstName,
+            last_name: lastName,
+            email,
+            full_name: fullName,
+            dob: formattedDob,
+            state: state,
+            profile_picture: null,
+            current_streak: 0,
+            goals_completed: 0,
+            longest_streak: 0,
+            goal_completion_rate: 0.0,
+            last_checkin: null,
+            is_private: false
+          });
 
         if (profileError) {
           if (profileError.code === '23505' && profileError.message.includes('username')) {
@@ -336,6 +598,31 @@ export default function SignUpScreen() {
               )}
             </View>
 
+            <View style={styles.agreementContainer}>
+              <TouchableOpacity
+                style={[styles.checkbox, agreed ? styles.checkboxChecked : null]}
+                onPress={() => setAgreed(!agreed)}
+              >
+                {agreed && <Text style={styles.checkboxCheck}>✓</Text>}
+              </TouchableOpacity>
+              <Text style={styles.agreementText}>
+                I agree to the{' '}
+                <Text
+                  style={styles.link}
+                  onPress={() => setTosModalVisible(true)}
+                >
+                  Terms of Service
+                </Text>{' '}
+                and{' '}
+                <Text
+                  style={styles.link}
+                  onPress={() => setPrivacyModalVisible(true)}
+                >
+                  Privacy Policy
+                </Text>
+              </Text>
+            </View>
+
             <TouchableOpacity style={styles.signUpButton} onPress={handleSignUp}>
               <Text style={styles.signUpButtonText}>Sign Up</Text>
             </TouchableOpacity>
@@ -346,6 +633,52 @@ export default function SignUpScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={privacyModalVisible}
+        onRequestClose={() => setPrivacyModalVisible(false)}
+      >
+        <View style={styles.policyModalContainer}>
+          {loadingPrivacy || !privacyContent ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#0066ff" />
+            </View>
+          ) : (
+            <PrivacyPolicyContent />
+          )}
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setPrivacyModalVisible(false)}
+          >
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={tosModalVisible}
+        onRequestClose={() => setTosModalVisible(false)}
+      >
+        <View style={styles.policyModalContainer}>
+          {loadingTos || !tosContent ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#0066ff" />
+            </View>
+          ) : (
+            <TosContent />
+          )}
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={() => setTosModalVisible(false)}
+          >
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -469,13 +802,46 @@ const styles = StyleSheet.create({
     color: '#0066ff',
     fontWeight: '600',
   },
+  agreementContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderWidth: 2,
+    borderColor: '#0066ff',
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  checkboxChecked: {
+    backgroundColor: '#0066ff',
+  },
+  checkboxCheck: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  agreementText: {
+    fontSize: 14,
+    color: '#444',
+    flex: 1,
+  },
+  link: {
+    color: '#0066ff',
+    textDecorationLine: 'underline',
+  },
   signUpButton: {
     backgroundColor: '#0066ff',
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 32,
+    marginTop: 16,
   },
   signUpButtonText: {
     color: 'white',
@@ -494,6 +860,62 @@ const styles = StyleSheet.create({
   },
   backButtonText: {
     color: '#0066ff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  policyModalContainer: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    padding: 24,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  policyScroll: {
+    marginTop:48,
+    flex: 1,
+  },
+  policyTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1a1a1a',
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  policyText: {
+    fontSize: 16,
+    color: '#444',
+    marginBottom: 12,
+    lineHeight: 24,
+  },
+  listContainer: {
+    marginLeft: 20,
+    marginBottom: 12,
+  },
+  listItem: {
+    fontSize: 16,
+    color: '#444',
+    marginBottom: 8,
+    lineHeight: 24,
+  },
+  closeButton: {
+    backgroundColor: '#0066ff',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+  },
+  closeButtonText: {
+    color: 'white',
     fontSize: 16,
     fontWeight: '600',
   },

@@ -29,7 +29,6 @@ type Mode = "current" | "archived";
 
 export default function GoalsPage() {
   const router = useRouter();
-
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
