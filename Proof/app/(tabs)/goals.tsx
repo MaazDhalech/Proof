@@ -1,6 +1,6 @@
 import { supabase } from "@/services/supabase";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -25,6 +25,8 @@ type Goal = {
   created_at: string;
 };
 
+type TabKey = "current" | "archived";
+
 export default function GoalsPage() {
   const router = useRouter();
 
@@ -33,6 +35,7 @@ export default function GoalsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [userId, setUserId] = useState<string | undefined>();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [tab, setTab] = useState<TabKey>("current");
 
   useEffect(() => {
     const init = async () => {
@@ -105,14 +108,27 @@ export default function GoalsPage() {
     const endDate = new Date(goal.end_date);
     const today = new Date();
 
-    const totalDays = Math.ceil(
-      (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+    const totalDays = Math.max(
+      1,
+      Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
     );
     const daysCompleted = goal.total_checkins || 0;
     const progressPercentage = Math.min(100, (daysCompleted / totalDays) * 100);
     const isComplete = today > endDate;
 
     return { daysCompleted, totalDays, progressPercentage, isComplete };
+  };
+
+  const getLocalDateYYYYMMDD = () => {
+    const now = new Date();
+    const offset = now.getTimezoneOffset() * 60000;
+    const local = new Date(now.getTime() - offset);
+    return local.toISOString().slice(0, 10); // YYYY-MM-DD
+  };
+
+  const isArchived = (g: Goal) => {
+    // Archived if end_date exists and today > end_date
+    return getLocalDateYYYYMMDD() > g.end_date;
   };
 
   const getCheckInStatus = (goal: Goal) => {
@@ -125,14 +141,7 @@ export default function GoalsPage() {
       };
     }
 
-    const getLocalDate = () => {
-      const date = new Date();
-      const offset = date.getTimezoneOffset() * 60000;
-      const localDate = new Date(date.getTime() - offset);
-      return localDate.toISOString().split("T")[0];
-    };
-
-    const today = getLocalDate();
+    const today = getLocalDateYYYYMMDD();
     const lastCheckIn = goal.last_day.split("T")[0];
 
     if (today === lastCheckIn) {
@@ -191,25 +200,31 @@ export default function GoalsPage() {
     return "✨";
   };
 
+  // Split goals into current and archived (memoized)
+  const { currentGoals, archivedGoals } = useMemo(() => {
+    const current: Goal[] = [];
+    const archived: Goal[] = [];
+    goals.forEach((g) => (isArchived(g) ? archived.push(g) : current.push(g)));
+    return { currentGoals: current, archivedGoals: archived };
+  }, [goals]);
+
   const renderGoal = ({ item }: { item: Goal }) => {
     const progress = calculateProgress(item);
     const checkInStatus = getCheckInStatus(item);
+    const archived = isArchived(item);
 
     return (
       <View style={styles.goalCard}>
-        {/* Title row with right-aligned badges */}
+        {/* Header row: title on left, ✓ + Delete on right */}
         <View style={styles.goalHeader}>
           <Text style={styles.goalName}>{item.name}</Text>
 
           <View style={styles.headerRight}>
-            {/* Show completed badge only when complete */}
-            {progress.isComplete && (
+            {archived && (
               <View style={styles.completedBadge}>
                 <Text style={styles.completedText}>✓</Text>
               </View>
             )}
-
-            {/* Delete pill always visible */}
             <TouchableOpacity
               style={styles.deletePill}
               onPress={() => confirmDelete(item.id, item.name)}
@@ -255,7 +270,7 @@ export default function GoalsPage() {
                 styles.progressBar,
                 {
                   width: `${progress.progressPercentage}%`,
-                  backgroundColor: progress.isComplete ? "#4CAF50" : "#007aff",
+                  backgroundColor: archived ? "#4CAF50" : "#007aff",
                 },
               ]}
             />
@@ -264,9 +279,7 @@ export default function GoalsPage() {
 
         <View style={styles.goalStats}>
           <View style={styles.streakBadge}>
-            <Text style={styles.streakEmoji}>
-              {getStreakEmoji(item.current_streak)}
-            </Text>
+            <Text style={styles.streakEmoji}>{getStreakEmoji(item.current_streak)}</Text>
             <Text style={styles.streakText}>Streak: {item.current_streak}</Text>
           </View>
 
@@ -280,12 +293,11 @@ export default function GoalsPage() {
         <TouchableOpacity
           style={[
             styles.checkInFull,
-            (!checkInStatus.canCheckIn || progress.isComplete) &&
-              styles.disabledButton,
-            checkInStatus.status === "streak-reset" && styles.warningButton,
+            (!checkInStatus.canCheckIn || archived) && styles.disabledButton,
+            checkInStatus.status === "streak-reset" && !archived && styles.warningButton,
           ]}
           onPress={() => {
-            if (checkInStatus.canCheckIn && !progress.isComplete) {
+            if (checkInStatus.canCheckIn && !archived) {
               router.push({
                 pathname: "/goals/[goalID]/check-in",
                 params: {
@@ -298,16 +310,15 @@ export default function GoalsPage() {
               });
             }
           }}
-          disabled={!checkInStatus.canCheckIn || progress.isComplete}
+          disabled={!checkInStatus.canCheckIn || archived}
         >
           <Text
             style={[
               styles.checkInText,
-              (!checkInStatus.canCheckIn || progress.isComplete) &&
-                styles.disabledButtonText,
+              (!checkInStatus.canCheckIn || archived) && styles.disabledButtonText,
             ]}
           >
-            {progress.isComplete ? "Completed" : checkInStatus.message}
+            {archived ? "Completed" : checkInStatus.message}
           </Text>
         </TouchableOpacity>
       </View>
@@ -318,19 +329,50 @@ export default function GoalsPage() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007aff" />
-        <Text style={styles.loadingText}>Loading your goals...</Text>
+        <Text style={styles.loadingText}>
+          {tab === "current" ? "Loading current goals..." : "Loading archived goals..."}
+        </Text>
       </View>
     );
   }
 
+  const dataForTab = tab === "current" ? currentGoals : archivedGoals;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.heading}>Your Goals</Text>
+        <Text style={styles.heading}>Goals</Text>
+
+        {/* Tabs */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity
+            style={[styles.tab, tab === "current" && styles.activeTab]}
+            onPress={() => setTab("current")}
+          >
+            <Text style={[styles.tabText, tab === "current" && styles.activeTabText]}>
+              Current
+            </Text>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{currentGoals.length}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tab, tab === "archived" && styles.activeTab]}
+            onPress={() => setTab("archived")}
+          >
+            <Text style={[styles.tabText, tab === "archived" && styles.activeTabText]}>
+              Archived
+            </Text>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{archivedGoals.length}</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
-        data={goals}
+        data={dataForTab}
         keyExtractor={(item) => item.id}
         renderItem={renderGoal}
         refreshControl={
@@ -340,28 +382,35 @@ export default function GoalsPage() {
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>No goals yet!</Text>
+            <Text style={styles.emptyTitle}>
+              {tab === "current" ? "No active goals!" : "No archived goals"}
+            </Text>
             <Text style={styles.emptySubtitle}>
-              Create your first goal to get started
+              {tab === "current"
+                ? "Create your first goal to get started"
+                : "Completed goals will show up here automatically"}
             </Text>
           </View>
         }
       />
 
-      <View style={styles.buttonGroup}>
-        <TouchableOpacity
-          style={styles.primaryButton}
-          onPress={() => router.push("/goals/create")}
-        >
-          <Text style={styles.primaryButtonText}>Create New Goal</Text>
-        </TouchableOpacity>
-      </View>
+      {tab === "current" && (
+        <View style={styles.buttonGroup}>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={() => router.push("/goals/create")}
+          >
+            <Text style={styles.primaryButtonText}>Create New Goal</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f8f9fa" },
+
   header: {
     padding: 20,
     paddingBottom: 12,
@@ -373,20 +422,57 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "700",
     marginTop: 70,
-    marginBottom: 16,
+    marginBottom: 12,
     color: "#1a1a1a",
   },
+
+  /* Tabs */
+  tabContainer: {
+    flexDirection: "row",
+    backgroundColor: "#f0f4f8",
+    borderRadius: 12,
+    padding: 4,
+    gap: 8,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: { fontSize: 16, fontWeight: "500", color: "#666", marginRight: 6 },
+  activeTabText: { color: "#007aff", fontWeight: "700" },
+  countPill: {
+    backgroundColor: "#dbeafe",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  countPillText: { color: "#1d4ed8", fontWeight: "700", fontSize: 12 },
+
   listContent: { padding: 16, paddingBottom: 140 },
+
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   loadingText: { marginTop: 12, fontSize: 16, color: "#666" },
+
   emptyContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     paddingVertical: 60,
   },
-  emptyTitle: { fontSize: 24, fontWeight: "bold", color: "#333", marginBottom: 8 },
-  emptySubtitle: { fontSize: 16, color: "#666", textAlign: "center" },
+  emptyTitle: { fontSize: 20, fontWeight: "700", color: "#333", marginBottom: 6 },
+  emptySubtitle: { fontSize: 14, color: "#666", textAlign: "center" },
 
   goalCard: {
     backgroundColor: "#ffffff",
@@ -408,13 +494,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   goalName: { fontSize: 18, fontWeight: "600", color: "#1a1a1a", flexShrink: 1 },
-  headerRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 8,
-  },
+  headerRight: { flexDirection: "row", alignItems: "center", marginLeft: 8 },
 
-  // Completed badge (kept small to fit alongside Delete)
+  // Completed badge (inline with Delete)
   completedBadge: {
     backgroundColor: "#4CAF50",
     width: 22,
@@ -482,7 +564,7 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: "#666", fontWeight: "500" },
   statValue: { fontSize: 14, color: "#1a1a1a", fontWeight: "600" },
 
-  /* ---------- Primary CTA ---------- */
+  /* Primary CTA */
   checkInFull: {
     backgroundColor: "#007aff",
     minHeight: 48,
@@ -498,7 +580,7 @@ const styles = StyleSheet.create({
   disabledButtonText: { color: "#999" },
   warningButton: { backgroundColor: "#ff9500" },
 
-  /* Footer CTA */
+  /* Footer CTA (only for Current tab) */
   buttonGroup: {
     position: "absolute",
     bottom: 0,
