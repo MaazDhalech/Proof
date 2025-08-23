@@ -97,29 +97,17 @@ export default function SignUpScreen() {
   const [loadingPrivacy, setLoadingPrivacy] = useState(false);
   const [loadingTos, setLoadingTos] = useState(false);
 
-  // Helper function to capitalize first letter
+  // Helper: capitalize first letter
   const capitalizeFirstLetter = (str: string) => {
     if (!str) return str;
     return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
   };
+  const handleFirstNameChange = (text: string) => setFirstName(capitalizeFirstLetter(text));
+  const handleLastNameChange = (text: string) => setLastName(capitalizeFirstLetter(text));
 
-  // Handle first name change with capitalization
-  const handleFirstNameChange = (text: string) => {
-    const capitalized = capitalizeFirstLetter(text);
-    setFirstName(capitalized);
-  };
-
-  // Handle last name change with capitalization
-  const handleLastNameChange = (text: string) => {
-    const capitalized = capitalizeFirstLetter(text);
-    setLastName(capitalized);
-  };
-
+  // Format input as MM-DD-YYYY for UX
   const formatDate = (text: string) => {
-    // Remove all non-numeric characters
     const cleaned = text.replace(/\D/g, '');
-    
-    // Format as MM-DD-YYYY
     if (cleaned.length >= 8) {
       return `${cleaned.slice(0, 2)}-${cleaned.slice(2, 4)}-${cleaned.slice(4, 8)}`;
     } else if (cleaned.length >= 6) {
@@ -131,19 +119,27 @@ export default function SignUpScreen() {
     }
     return cleaned;
   };
+  const handleDateChange = (text: string) => setDob(formatDate(text));
 
-  const handleDateChange = (text: string) => {
-    const formatted = formatDate(text);
-    setDob(formatted);
+  // Convert MM-DD-YYYY → YYYY-MM-DD for DB (DATE)
+  const toISODateFromMMDDYYYY = (s: string) => {
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s.trim());
+    if (!m) return null;
+    const [_, mm, dd, yyyy] = m;
+    // Basic sanity
+    const month = Number(mm), day = Number(dd), year = Number(yyyy);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    // Construct ISO; Date can further validate
+    const iso = `${yyyy}-${mm}-${dd}`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return null;
+    return iso;
   };
 
-  // Get state display name
   const getStateDisplayName = (stateCode: string) => {
     const stateObj = US_STATES.find(s => s.value === stateCode);
     return stateObj ? stateObj.label : 'Select a state...';
   };
-
-  // Handle state selection
   const handleStateSelect = (stateValue: string) => {
     setState(stateValue);
     setStateDropdownVisible(false);
@@ -396,21 +392,37 @@ export default function SignUpScreen() {
         email,
         password,
         options: {
-          data: { 
+          data: {
             username,
             first_name: firstName,
-            last_name: lastName
+            last_name: lastName,
           },
         },
       });
-
       if (signUpError) throw signUpError;
 
-      // 2. If signup successful, create profile record
+      // 2) Insert profile row — ONLY columns that exist in your `profile` table
       if (authData.user) {
-        // Create full_name from first and last name
-        const fullName = [firstName.trim(), lastName.trim()].filter(name => name.length > 0).join(' ') || null;
-        
+        const fullName =
+          [firstName.trim(), lastName.trim()].filter(Boolean).join(' ') || null;
+
+        const payload = {
+          id: authData.user.id,
+          username,
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          full_name: fullName,
+          dob: isoDob,            // DATE column expects YYYY-MM-DD
+          state: state,           // text (e.g., 'CA')
+          profile_picture: null,  // text nullable
+          goals_completed: 0,     // int
+          longest_streak: 0,      // int
+          goal_completion_rate: 0 // numeric
+          // created_at/updated_at handled by DB defaults if set
+          // expo_push_token can be set later after you register for notifications
+        };
+
         const { error: profileError } = await supabase
           .from('profile')
           .insert({
@@ -444,7 +456,6 @@ export default function SignUpScreen() {
         `Welcome ${firstName}! Please check your email to verify your account before signing in.`,
         [{ text: 'OK', onPress: () => router.replace('/(auth)/signin') }]
       );
-
     } catch (error) {
       console.error('Sign up error:', error);
       Alert.alert(
@@ -465,7 +476,7 @@ export default function SignUpScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? -50 : 0}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContainer}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -542,7 +553,7 @@ export default function SignUpScreen() {
               placeholder="MM-DD-YYYY"
               placeholderTextColor="#999"
               value={dob}
-              onChangeText={handleDateChange}
+              onChangeText={setDob}
               keyboardType="numeric"
               maxLength={10}
               returnKeyType="next"
@@ -561,7 +572,7 @@ export default function SignUpScreen() {
                   {stateDropdownVisible ? '▲' : '▼'}
                 </Text>
               </TouchableOpacity>
-              
+
               {stateDropdownVisible && (
                 <View style={styles.dropdownOptions}>
                   <ScrollView style={styles.dropdownScroll} nestedScrollEnabled={true}>

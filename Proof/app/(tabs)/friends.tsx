@@ -70,15 +70,16 @@ export default function FriendsScreen() {
     setLoading(false);
   };
 
-  const fetchFriendsWithGoals = async (userId: string) => {
+  const fetchFriendsWithGoals = async (uid: string) => {
     try {
-      // First, fetch friends
-      const { data: friendsData, error: friendsError } = await supabase
+      // 1) Get all accepted friendships where the user is either side
+      const { data: rows, error: friendsError } = await supabase
         .from('friendships')
         .select(`
           id,
           user_id,
           friend_id,
+          status,
           sender:profile!friendships_user_id_fkey (
             id,
             username,
@@ -92,19 +93,25 @@ export default function FriendsScreen() {
             last_name
           )
         `)
-        .or(`user_id.eq.${userId},friend_id.eq.${userId}`)
+        .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
         .eq('status', 'accepted');
 
       if (friendsError) throw friendsError;
+      const rowsSafe = rows || [];
 
-      // Get friend IDs
-      const friendIds = friendsData.map((item: any) => {
-        const isUserSender = item.user_id === userId;
-        const profile = isUserSender ? item.receiver : item.sender;
-        return profile.id;
-      });
+      // 2) Dedupe by the OTHER user's id
+      const uniqueByOtherId = new Map<string, any>();
+      for (const row of rowsSafe) {
+        const otherId = row.user_id === uid ? row.friend_id : row.user_id;
+        if (!uniqueByOtherId.has(otherId)) {
+          uniqueByOtherId.set(otherId, row);
+        }
+      }
 
-      // Fetch challenges for all friends
+      // 3) Build a list of unique friend user IDs
+      const friendIds = Array.from(uniqueByOtherId.keys());
+
+      // 4) Fetch challenges for all those friends
       let challengesData: any[] = [];
       if (friendIds.length > 0) {
         const { data, error: challengesError } = await supabase
@@ -116,29 +123,32 @@ export default function FriendsScreen() {
         challengesData = data || [];
       }
 
-      // Combine friends with their challenges
-      const formatted: Friend[] = friendsData.map((item: any) => {
-        const isUserSender = item.user_id === userId;
-        const profile = isUserSender ? item.receiver : item.sender;
-        
-        const friendChallenges = challengesData.filter(
-          (challenge) => challenge.user_id === profile.id
-        );
+      // 5) Format: one Friend per unique person
+      const formatted: Friend[] = Array.from(uniqueByOtherId.entries()).map(
+        ([otherId, row]) => {
+          const isUserSender = row.user_id === uid;
+          const profile = isUserSender ? row.receiver : row.sender;
 
-        return {
-          id: profile.id,
-          name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
-          username: profile?.username ?? '',
-          friendshipId: item.id,
-          challenges: friendChallenges,
-        };
-      });
+          const friendChallenges = challengesData.filter(
+            (ch) => ch.user_id === profile.id
+          );
+
+          return {
+            id: profile.id, // other user's id
+            name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+            username: profile?.username ?? '',
+            friendshipId: profile.id, // stable key for FlatList
+            challenges: friendChallenges,
+          };
+        }
+      );
 
       setFriends(formatted);
     } catch (error) {
       console.error('Error in fetchFriendsWithGoals:', error);
     }
   };
+
 
   const handleUnfriend = async (friendId: string) => {
     if (!userId) return;
