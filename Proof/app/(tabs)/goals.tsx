@@ -17,7 +17,7 @@ type Goal = {
   name: string;
   description: string;
   start_date: string;
-  end_date: string;
+  end_date: string | null; // <= allow ongoing goals
   frequency: number;
   current_streak: number;
   total_checkins: number;
@@ -63,7 +63,7 @@ export default function GoalsPage() {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setGoals(data || []);
+      setGoals((data || []) as Goal[]);
     } catch (err) {
       console.error("Error fetching goals:", err);
     }
@@ -79,14 +79,8 @@ export default function GoalsPage() {
   const deleteGoal = async (goalId: string) => {
     try {
       setDeletingId(goalId);
-
-      // If you have child rows (e.g., proof) and no FK CASCADE, delete them first here:
-      // await supabase.from('proof').delete().eq('challenge_id', goalId);
-
       const { error } = await supabase.from("challenges").delete().eq("id", goalId);
       if (error) throw error;
-
-      // Optimistic UI update
       setGoals((prev) => prev.filter((g) => g.id !== goalId));
     } catch (e) {
       console.error("Delete failed:", e);
@@ -105,6 +99,18 @@ export default function GoalsPage() {
 
   const calculateProgress = (goal: Goal) => {
     const startDate = new Date(goal.start_date);
+
+    // Ongoing goal: no end_date
+    if (!goal.end_date) {
+      return {
+        daysCompleted: goal.total_checkins || 0,
+        totalDays: 0,
+        progressPercentage: 0,
+        isComplete: false,
+        isIndefinite: true as const,
+      };
+    }
+
     const endDate = new Date(goal.end_date);
     const today = new Date();
 
@@ -116,80 +122,49 @@ export default function GoalsPage() {
     const progressPercentage = Math.min(100, (daysCompleted / totalDays) * 100);
     const isComplete = today > endDate;
 
-    return { daysCompleted, totalDays, progressPercentage, isComplete };
+    return { daysCompleted, totalDays, progressPercentage, isComplete, isIndefinite: false as const };
   };
 
   const getLocalDateYYYYMMDD = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
     const local = new Date(now.getTime() - offset);
-    return local.toISOString().slice(0, 10); // YYYY-MM-DD
+    return local.toISOString().slice(0, 10);
   };
 
   const isArchived = (g: Goal) => {
-    // Archived if end_date exists and today > end_date
+    // Ongoing goals never get archived automatically
+    if (!g.end_date) return false;
     return getLocalDateYYYYMMDD() > g.end_date;
   };
 
   const getCheckInStatus = (goal: Goal) => {
     if (!goal.last_day) {
-      return {
-        canCheckIn: true,
-        status: "available",
-        message: "Check In",
-        shouldResetStreak: false,
-      };
+      return { canCheckIn: true, status: "available", message: "Check In", shouldResetStreak: false };
     }
-
     const today = getLocalDateYYYYMMDD();
     const lastCheckIn = goal.last_day.split("T")[0];
 
     if (today === lastCheckIn) {
-      return {
-        canCheckIn: false,
-        status: "locked",
-        message: "Checked In Today",
-        shouldResetStreak: false,
-      };
+      return { canCheckIn: false, status: "locked", message: "Checked In Today", shouldResetStreak: false };
     }
 
     const todayDate = new Date(today);
     const lastCheckInDate = new Date(lastCheckIn);
-    const daysDifference = Math.floor(
-      (todayDate.getTime() - lastCheckInDate.getTime()) / (1000 * 60 * 60 * 24)
-    );
+    const daysDifference = Math.floor((todayDate.getTime() - lastCheckInDate.getTime()) / (1000 * 60 * 60 * 24));
 
     if (daysDifference === 1) {
-      return {
-        canCheckIn: true,
-        status: "available",
-        message: "Check In",
-        shouldResetStreak: false,
-      };
+      return { canCheckIn: true, status: "available", message: "Check In", shouldResetStreak: false };
     } else if (daysDifference > 1) {
-      return {
-        canCheckIn: true,
-        status: "streak-reset",
-        message: "Check In (Reset Streak)",
-        shouldResetStreak: true,
-      };
+      return { canCheckIn: true, status: "streak-reset", message: "Check In (Reset Streak)", shouldResetStreak: true };
     }
-
-    return {
-      canCheckIn: false,
-      status: "locked",
-      message: "Locked",
-      shouldResetStreak: false,
-    };
+    return { canCheckIn: false, status: "locked", message: "Locked", shouldResetStreak: false };
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString?: string | null) => {
+    if (!dateString) return "Ongoing";
     const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
+    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   };
 
   const getStreakEmoji = (streak: number) => {
@@ -200,7 +175,7 @@ export default function GoalsPage() {
     return "✨";
   };
 
-  // Split goals into current and archived (memoized)
+  // Split goals into current and archived
   const { currentGoals, archivedGoals } = useMemo(() => {
     const current: Goal[] = [];
     const archived: Goal[] = [];
@@ -215,7 +190,6 @@ export default function GoalsPage() {
 
     return (
       <View style={styles.goalCard}>
-        {/* Header row: title on left, ✓ + Delete on right */}
         <View style={styles.goalHeader}>
           <Text style={styles.goalName}>{item.name}</Text>
 
@@ -240,9 +214,7 @@ export default function GoalsPage() {
           </View>
         </View>
 
-        {!!item.description && (
-          <Text style={styles.goalDescription}>{item.description}</Text>
-        )}
+        {!!item.description && <Text style={styles.goalDescription}>{item.description}</Text>}
 
         <View style={styles.dateSection}>
           <View style={styles.dateRow}>
@@ -258,23 +230,28 @@ export default function GoalsPage() {
         <View style={styles.progressSection}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>Progress</Text>
-            <Text style={styles.progressStats}>
-              {progress.daysCompleted}/{progress.totalDays} days (
-              {Math.round(progress.progressPercentage)}%)
-            </Text>
+            {progress.isIndefinite ? (
+              <Text style={styles.progressStats}>{progress.daysCompleted} check-ins</Text>
+            ) : (
+              <Text style={styles.progressStats}>
+                {progress.daysCompleted}/{progress.totalDays} days ({Math.round(progress.progressPercentage)}%)
+              </Text>
+            )}
           </View>
 
-          <View style={styles.progressBarContainer}>
-            <View
-              style={[
-                styles.progressBar,
-                {
-                  width: `${progress.progressPercentage}%`,
-                  backgroundColor: archived ? "#4CAF50" : "#007aff",
-                },
-              ]}
-            />
-          </View>
+          {!progress.isIndefinite && (
+            <View style={styles.progressBarContainer}>
+              <View
+                style={[
+                  styles.progressBar,
+                  {
+                    width: `${progress.progressPercentage}%`,
+                    backgroundColor: archived ? "#4CAF50" : "#007aff",
+                  },
+                ]}
+              />
+            </View>
+          )}
         </View>
 
         <View style={styles.goalStats}>
@@ -289,7 +266,6 @@ export default function GoalsPage() {
           </View>
         </View>
 
-        {/* Full-width primary CTA */}
         <TouchableOpacity
           style={[
             styles.checkInFull,
@@ -343,15 +319,12 @@ export default function GoalsPage() {
       <View style={styles.header}>
         <Text style={styles.heading}>Goals</Text>
 
-        {/* Tabs */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tab, tab === "current" && styles.activeTab]}
             onPress={() => setTab("current")}
           >
-            <Text style={[styles.tabText, tab === "current" && styles.activeTabText]}>
-              Current
-            </Text>
+            <Text style={[styles.tabText, tab === "current" && styles.activeTabText]}>Current</Text>
             <View style={styles.countPill}>
               <Text style={styles.countPillText}>{currentGoals.length}</Text>
             </View>
@@ -361,9 +334,7 @@ export default function GoalsPage() {
             style={[styles.tab, tab === "archived" && styles.activeTab]}
             onPress={() => setTab("archived")}
           >
-            <Text style={[styles.tabText, tab === "archived" && styles.activeTabText]}>
-              Archived
-            </Text>
+            <Text style={[styles.tabText, tab === "archived" && styles.activeTabText]}>Archived</Text>
             <View style={styles.countPill}>
               <Text style={styles.countPillText}>{archivedGoals.length}</Text>
             </View>
@@ -375,9 +346,7 @@ export default function GoalsPage() {
         data={dataForTab}
         keyExtractor={(item) => item.id}
         renderItem={renderGoal}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
@@ -396,10 +365,7 @@ export default function GoalsPage() {
 
       {tab === "current" && (
         <View style={styles.buttonGroup}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => router.push("/goals/create")}
-          >
+          <TouchableOpacity style={styles.primaryButton} onPress={() => router.push("/goals/create")}>
             <Text style={styles.primaryButtonText}>Create New Goal</Text>
           </TouchableOpacity>
         </View>
@@ -496,7 +462,6 @@ const styles = StyleSheet.create({
   goalName: { fontSize: 18, fontWeight: "600", color: "#1a1a1a", flexShrink: 1 },
   headerRight: { flexDirection: "row", alignItems: "center", marginLeft: 8 },
 
-  // Completed badge (inline with Delete)
   completedBadge: {
     backgroundColor: "#4CAF50",
     width: 22,
@@ -508,7 +473,6 @@ const styles = StyleSheet.create({
   },
   completedText: { color: "#fff", fontSize: 12, fontWeight: "bold" },
 
-  // Delete pill (inline, not absolute)
   deletePill: {
     backgroundColor: "#dc3545",
     paddingHorizontal: 10,
@@ -564,7 +528,6 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: "#666", fontWeight: "500" },
   statValue: { fontSize: 14, color: "#1a1a1a", fontWeight: "600" },
 
-  /* Primary CTA */
   checkInFull: {
     backgroundColor: "#007aff",
     minHeight: 48,
@@ -575,12 +538,10 @@ const styles = StyleSheet.create({
   },
   checkInText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 
-  /* Disabled & warning variants */
   disabledButton: { backgroundColor: "#e9ecef" },
   disabledButtonText: { color: "#999" },
   warningButton: { backgroundColor: "#ff9500" },
 
-  /* Footer CTA (only for Current tab) */
   buttonGroup: {
     position: "absolute",
     bottom: 0,

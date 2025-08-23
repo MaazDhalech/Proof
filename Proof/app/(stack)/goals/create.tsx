@@ -13,6 +13,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 
 export default function CreateGoalScreen() {
@@ -22,96 +23,113 @@ export default function CreateGoalScreen() {
   const [description, setDescription] = useState('');
   const [startDate, setStartDate] = useState(new Date());
   const [endDate, setEndDate] = useState<Date | null>(null);
+  const [isIndefinite, setIsIndefinite] = useState(false);
   const [frequency, setFrequency] = useState('');
   const [loading, setLoading] = useState(false);
 
-const handleSubmit = async () => {
-  const parsedFrequency = parseInt(frequency);
-
-  // Validate required fields
-  if (!name.trim()) {
-    Alert.alert('Missing Field', 'Goal name is required.');
-    return;
-  }
-
-  if (!description.trim()) {
-    Alert.alert('Missing Field', 'Description is required.');
-    return;
-  }
-
-  if (!frequency || isNaN(parsedFrequency)) {
-    Alert.alert('Missing Field', 'Please enter a valid frequency.');
-    return;
-  }
-
-  if (parsedFrequency < 1) {
-    Alert.alert('Invalid Frequency', 'Frequency must be at least 1.');
-    return;
-  }
-
-  if (!startDate) {
-    Alert.alert('Missing Field', 'Start date is required.');
-    return;
-  }
-
-  if (!endDate) {
-    Alert.alert('Missing Field', 'End date is required.');
-    return;
-  }
-
-  const start = new Date(startDate.setHours(0, 0, 0, 0));
-  const end = new Date(endDate.setHours(0, 0, 0, 0));
-
-  if (start.getTime() === end.getTime()) {
-    Alert.alert('Invalid Dates', 'Start and end dates cannot be the same.');
-    return;
-  }
-
-  if (end < start) {
-    Alert.alert('Invalid Dates', 'End date cannot be before start date.');
-    return;
-  }
-
-  setLoading(true);
-
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-  if (sessionError || !session?.user) {
-    Alert.alert('Auth error', 'Please sign in again.');
-    setLoading(false);
-    return;
-  }
-
-  const userId = session.user.id;
-
-  const payload = {
-    user_id: userId,
-    name,
-    description,
-    start_date: start.toISOString().split('T')[0],
-    end_date: end.toISOString().split('T')[0],
-    created_at: new Date().toISOString(),
-    current_streak: 0,
-    last_day: null,
-    frequency: parsedFrequency,
+  // Format a JS Date to local YYYY-MM-DD without mutating the source date
+  const toLocalYMD = (d: Date) => {
+    const year = d.getFullYear();
+    const month = `${d.getMonth() + 1}`.padStart(2, '0');
+    const day = `${d.getDate()}`.padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
-  const { error } = await supabase.from('challenges').insert(payload);
+  const handleSubmit = async () => {
+    const parsedFrequency = parseInt(frequency, 10);
 
-  if (error) {
-    console.error('Create Goal Error:', error);
-    Alert.alert('Error', 'Failed to create goal.');
-  } else {
-    router.replace('/goals');
-  }
+    // Validate required fields
+    if (!name.trim()) {
+      Alert.alert('Missing Field', 'Goal name is required.');
+      return;
+    }
 
-  setLoading(false);
-};
+    if (!description.trim()) {
+      Alert.alert('Missing Field', 'Description is required.');
+      return;
+    }
 
+    if (!frequency || isNaN(parsedFrequency)) {
+      Alert.alert('Missing Field', 'Please enter a valid frequency.');
+      return;
+    }
+
+    if (parsedFrequency < 1) {
+      Alert.alert('Invalid Frequency', 'Frequency must be at least 1.');
+      return;
+    }
+
+    if (!startDate) {
+      Alert.alert('Missing Field', 'Start date is required.');
+      return;
+    }
+
+    // Only validate end date if not indefinite
+    if (!isIndefinite) {
+      if (!endDate) {
+        Alert.alert('Missing Field', 'End date is required (or mark as ongoing).');
+        return;
+      }
+
+      const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+      const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+
+      if (start.getTime() === end.getTime()) {
+        Alert.alert('Invalid Dates', 'Start and end dates cannot be the same.');
+        return;
+      }
+
+      if (end < start) {
+        Alert.alert('Invalid Dates', 'End date cannot be before start date.');
+        return;
+      }
+    }
+
+    setLoading(true);
+
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    if (sessionError || !session?.user) {
+      Alert.alert('Auth error', 'Please sign in again.');
+      setLoading(false);
+      return;
+    }
+
+    const userId = session.user.id;
+
+    const payload = {
+      user_id: userId,
+      name: name.trim(),
+      description: description.trim(),
+      start_date: toLocalYMD(startDate),
+      end_date: isIndefinite ? null : toLocalYMD(endDate as Date),
+      created_at: new Date().toISOString(),
+      current_streak: 0,
+      last_day: null,
+      frequency: parsedFrequency,
+    };
+
+    const { error } = await supabase.from('challenges').insert(payload);
+
+    if (error) {
+      console.error('Create Goal Error:', error);
+      Alert.alert('Error', 'Failed to create goal.');
+    } else {
+      router.replace('/goals');
+    }
+
+    setLoading(false);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardContainer}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardContainer}
+      >
         <ScrollView contentContainerStyle={styles.content}>
           <TouchableOpacity onPress={() => router.replace('/goals')} style={styles.backButton}>
             <Text style={styles.backButtonText}>← Back</Text>
@@ -131,7 +149,7 @@ const handleSubmit = async () => {
           </View>
 
           <View style={styles.inputSection}>
-            <Text style={styles.label}>Description</Text>
+            <Text style={styles.label}>Description *</Text>
             <TextInput
               placeholder="Describe your goal"
               style={[styles.input, styles.textArea]}
@@ -145,7 +163,10 @@ const handleSubmit = async () => {
 
           <View style={styles.inputSection}>
             <Text style={styles.label}>How many times? *</Text>
-            <Text style={styles.labelDescription}>Set how many times you want to commit to this goal within a time period</Text>
+            <Text style={styles.labelDescription}>
+              Set how many times you want to commit to this goal within a time period.
+              For ongoing goals, this is your recurring target.
+            </Text>
             <TextInput
               placeholder="e.g., 30"
               style={styles.input}
@@ -155,15 +176,38 @@ const handleSubmit = async () => {
             />
           </View>
 
-          <Text style={styles.label}>Start Date</Text>
-          <DateTimePicker value={startDate} mode="date" onChange={(_, date) => date && setStartDate(date)} />
+          <View style={styles.inputSection}>
+            <Text style={styles.label}>Start Date *</Text>
+            <DateTimePicker
+              value={startDate}
+              mode="date"
+              onChange={(_, date) => date && setStartDate(date)}
+            />
+          </View>
 
-          <Text style={styles.label}>End Date</Text>
-          <DateTimePicker
-            value={endDate || new Date()}
-            mode="date"
-            onChange={(_, date) => date && setEndDate(date)}
-          />
+          {/* Indefinite toggle */}
+          <View style={[styles.inputSection, styles.switchRow]}>
+            <Text style={styles.label}>No end date (ongoing)</Text>
+            <Switch
+              value={isIndefinite}
+              onValueChange={(v) => {
+                setIsIndefinite(v);
+                if (v) setEndDate(null);
+              }}
+            />
+          </View>
+
+          {/* End date only when not indefinite */}
+          {!isIndefinite && (
+            <View style={styles.inputSection}>
+              <Text style={styles.label}>End Date *</Text>
+              <DateTimePicker
+                value={endDate || new Date()}
+                mode="date"
+                onChange={(_, date) => date && setEndDate(date)}
+              />
+            </View>
+          )}
 
           <TouchableOpacity
             style={[styles.submitButton, loading && { backgroundColor: '#888' }]}
@@ -199,6 +243,7 @@ const styles = StyleSheet.create({
   },
   backButtonText: { color: '#0066ff', fontSize: 16, fontWeight: '600' },
   heading: { fontSize: 28, fontWeight: 'bold', marginBottom: 16, color: '#111' },
+
   inputSection: { marginBottom: 24 },
   input: {
     borderWidth: 1,
@@ -216,6 +261,13 @@ const styles = StyleSheet.create({
   textArea: { height: 120, textAlignVertical: 'top' },
   label: { fontWeight: '700', fontSize: 16, color: '#333', marginBottom: 8 },
   labelDescription: { fontSize: 14, color: '#666', marginBottom: 12 },
+
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
   submitButton: {
     backgroundColor: '#007aff',
     padding: 18,
