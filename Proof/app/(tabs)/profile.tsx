@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -43,6 +44,12 @@ type UserStats = {
   longestStreak: number;
   completionRate: number;
   totalGoals: number;
+};
+
+type BlockedUser = {
+  id: string;
+  username: string;
+  profile_picture?: string;
 };
 
 const US_STATES = [
@@ -109,40 +116,123 @@ const SettingsOverlay = ({
 }) => {
   const [privacyModalVisible, setPrivacyModalVisible] = useState(false);
   const [tosModalVisible, setTosModalVisible] = useState(false);
+  const [blockedUsersModalVisible, setBlockedUsersModalVisible] =
+    useState(false);
   const [privacyContent, setPrivacyContent] = useState<string>("");
   const [tosContent, setTosContent] = useState<string>("");
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-const fetchPolicies = async () => {
-  setLoading(true);
-  try {
-    const privacyResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
-    );
-    const privacyText = await privacyResponse.text();
-    setPrivacyContent(privacyText);
+    const fetchPoliciesAndBlockedUsers = async () => {
+      setLoading(true);
+      try {
+        // Fetch Privacy Policy and Terms of Service
+        const privacyResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/5af2eb0a167f66e6c020016174541cf7/raw"
+        );
+        const privacyText = await privacyResponse.text();
+        setPrivacyContent(privacyText);
 
-    const tosResponse = await fetch(
-      "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
-    );
-    const tosText = await tosResponse.text();
-    setTosContent(tosText);
-  } catch (error) {
-    console.error("Error fetching policies:", error);
-    Alert.alert(
-      "Error",
-      "Failed to load Privacy Policy or Terms of Service"
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+        const tosResponse = await fetch(
+          "https://gist.githubusercontent.com/babikerb/014985e01ced3341ee89740a4928949b/raw"
+        );
+        const tosText = await tosResponse.text();
+        setTosContent(tosText);
+
+        // Fetch blocked users with profile picture
+        const { data: userData, error: userError } = await supabase
+          .from("profile")
+          .select("blocked_users")
+          .eq("id", (await supabase.auth.getSession()).data.session?.user.id)
+          .single();
+
+        if (userError) throw userError;
+
+        const blockedUserIds = userData?.blocked_users || [];
+        if (blockedUserIds.length > 0) {
+          const { data: blockedUsersData, error: blockedUsersError } =
+            await supabase
+              .from("profile")
+              .select("id, username, profile_picture") // Added profile_picture
+              .in("id", blockedUserIds);
+
+          if (blockedUsersError) throw blockedUsersError;
+
+          setBlockedUsers(blockedUsersData || []);
+        } else {
+          setBlockedUsers([]);
+        }
+      } catch (error) {
+        console.error("Error fetching policies or blocked users:", error);
+        Alert.alert(
+          "Error",
+          "Failed to load Privacy Policy, Terms of Service, or Blocked Users"
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
     if (visible) {
-      fetchPolicies();
+      fetchPoliciesAndBlockedUsers();
     }
   }, [visible]);
+
+  const handleUnblock = async (userId: string, username: string) => {
+    Alert.alert(
+      "Unblock User",
+      `Are you sure you want to unblock ${username}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Unblock",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const currentUserId = (await supabase.auth.getSession()).data
+                .session?.user.id;
+              if (!currentUserId) {
+                Alert.alert(
+                  "Error",
+                  "You must be logged in to unblock a user."
+                );
+                return;
+              }
+
+              const { data: userData, error: fetchError } = await supabase
+                .from("profile")
+                .select("blocked_users")
+                .eq("id", currentUserId)
+                .single();
+
+              if (fetchError) throw fetchError;
+
+              const blockedUsers = userData?.blocked_users || [];
+              const updatedBlockedUsers = blockedUsers.filter(
+                (id: string) => id !== userId
+              );
+
+              const { error: updateError } = await supabase
+                .from("profile")
+                .update({ blocked_users: updatedBlockedUsers })
+                .eq("id", currentUserId);
+
+              if (updateError) throw updateError;
+
+              setBlockedUsers((prev) =>
+                prev.filter((user) => user.id !== userId)
+              );
+              Alert.alert("Success", `${username} has been unblocked.`);
+            } catch (error) {
+              console.error("Error unblocking user:", error);
+              Alert.alert("Error", "Failed to unblock user. Please try again.");
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const handleSignOut = async () => {
     try {
@@ -305,6 +395,56 @@ const fetchPolicies = async () => {
     </ScrollView>
   );
 
+  const BlockedUsersContent = () => (
+    <View style={styles.blockedUsersContainer}>
+      <Text style={styles.blockedUsersTitle}>Blocked Users</Text>
+      {blockedUsers.length === 0 ? (
+        <Text style={styles.noBlockedUsersText}>
+          No users are currently blocked.
+        </Text>
+      ) : (
+        <ScrollView style={styles.blockedUsersScroll}>
+          {blockedUsers.map((blockedUser) => {
+            const initials = blockedUser.username
+              ? blockedUser.username.slice(0, 2).toUpperCase()
+              : "";
+            return (
+              <View key={blockedUser.id} style={styles.blockedUserItem}>
+                <View style={styles.blockedUserAvatarContainer}>
+                  {blockedUser.profile_picture ? (
+                    <Image
+                      source={{ uri: blockedUser.profile_picture }}
+                      style={styles.blockedUserAvatar}
+                    />
+                  ) : (
+                    <Text style={styles.blockedUserAvatarText}>{initials}</Text>
+                  )}
+                </View>
+                <Text style={styles.blockedUserName}>
+                  @{blockedUser.username}
+                </Text>
+                <TouchableOpacity
+                  style={styles.unblockButton}
+                  onPress={() =>
+                    handleUnblock(blockedUser.id, blockedUser.username)
+                  }
+                >
+                  <Text style={styles.unblockButtonText}>Unblock</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
+      <TouchableOpacity
+        style={styles.closeButton}
+        onPress={() => setBlockedUsersModalVisible(false)}
+      >
+        <Text style={styles.closeButtonText}>Close</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <Modal
       animationType="slide"
@@ -312,11 +452,11 @@ const fetchPolicies = async () => {
       visible={visible}
       onRequestClose={onClose}
     >
-              <View style={styles.backButtonContainer}>
-          <TouchableOpacity onPress={onClose} style={styles.backButton}>
-            <Text style={styles.backButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.backButtonContainer}>
+        <TouchableOpacity onPress={onClose} style={styles.backButton}>
+          <Text style={styles.backButtonText}>← Back</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.settingsContainer}>
         <View style={styles.settingsHeader}>
           <Text style={styles.settingsTitle}>Settings</Text>
@@ -339,6 +479,12 @@ const fetchPolicies = async () => {
               onPress={() => setTosModalVisible(true)}
             >
               <Text style={styles.buttonText}>Terms of Service</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => setBlockedUsersModalVisible(true)}
+            >
+              <Text style={styles.buttonText}>Blocked Users</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.logoutButton}
@@ -378,6 +524,16 @@ const fetchPolicies = async () => {
             >
               <Text style={styles.closeButtonText}>Close</Text>
             </TouchableOpacity>
+          </View>
+        </Modal>
+        <Modal
+          animationType="slide"
+          transparent={false}
+          visible={blockedUsersModalVisible}
+          onRequestClose={() => setBlockedUsersModalVisible(false)}
+        >
+          <View style={styles.policyModalContainer}>
+            <BlockedUsersContent />
           </View>
         </Modal>
       </View>
@@ -951,13 +1107,13 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   settingsHeader: {
-    marginTop:0,
-    marginBottom: 24, // Reduced margin to adjust spacing
-    alignItems: "center", // Center the header content
+    marginTop: 0,
+    marginBottom: 24,
+    alignItems: "center",
   },
   backButtonContainer: {
-    marginTop: 48, // Space above the back button
-    marginBottom: 0, // Space below the back button
+    marginTop: 48,
+    marginBottom: 0,
   },
   backButton: {
     padding: 8,
@@ -971,7 +1127,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "700",
     color: "#1e293b",
-    textAlign: "center", // Center the title text
+    textAlign: "center",
   },
   loadingContainer: {
     flex: 1,
@@ -1122,6 +1278,77 @@ const styles = StyleSheet.create({
   policyScroll: {
     marginTop: 48,
     flex: 1,
+  },
+  blockedUsersContainer: {
+    flex: 1,
+    backgroundColor: "#f8fafc",
+    padding: 24,
+  },
+  blockedUsersTitle: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#1e293b",
+    textAlign: "center",
+    marginBottom: 24,
+    marginTop: 48,
+  },
+  blockedUsersScroll: {
+    flex: 1,
+  },
+  blockedUserItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  blockedUserAvatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#3b82f6",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  blockedUserAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  blockedUserAvatarText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#fff",
+  },
+  blockedUserName: {
+    fontSize: 16,
+    color: "#1e293b",
+    fontWeight: "500",
+    flex: 1,
+  },
+  unblockButton: {
+    backgroundColor: "#ef4444",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  unblockButtonText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  noBlockedUsersText: {
+    fontSize: 16,
+    color: "#64748b",
+    textAlign: "center",
+    marginTop: 16,
   },
   policyTitle: {
     fontSize: 24,

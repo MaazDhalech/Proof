@@ -52,7 +52,6 @@ type UserProfile = {
 type UserStats = {
   goalsCompleted: number;
   longestStreak: number;
-
   completionRate: number;
   totalGoals: number;
 };
@@ -90,18 +89,32 @@ const ViewProfilePopup = ({
   });
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
-  const [isReporting, setIsReporting] = useState(false); // New state to track report form
+  const [isReporting, setIsReporting] = useState(false);
   const [reportData, setReportData] = useState<ReportData>({
     reason: "",
     details: "",
   });
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   useEffect(() => {
     const fetchUserData = async () => {
       if (!visible || !userId) return;
       setLoading(true);
       try {
+        // Fetch current user's blocked_users list
+        const { data: currentUserData, error: currentUserError } =
+          await supabase
+            .from("profile")
+            .select("blocked_users")
+            .eq("id", (await supabase.auth.getSession()).data.session?.user.id)
+            .single();
+
+        if (currentUserError) throw currentUserError;
+
+        const blockedUsers = currentUserData?.blocked_users || [];
+        setIsBlocked(blockedUsers.includes(userId));
+
         const { data: profileData, error: profileError } = await supabase
           .from("profile")
           .select(
@@ -190,13 +203,82 @@ const ViewProfilePopup = ({
     } finally {
       setMenuVisible(false);
       setReportData({ reason: "", details: "" });
-      setIsReporting(false); // Reset reporting state
+      setIsReporting(false);
     }
   };
 
-  const handleBlock = () => {
-    Alert.alert("Block User", "This feature is not yet implemented.");
-    setMenuVisible(false);
+  const handleBlock = async () => {
+    const currentUserId = (await supabase.auth.getSession()).data.session?.user
+      .id;
+    if (!currentUserId) {
+      Alert.alert("Error", "You must be logged in to block a user.");
+      return;
+    }
+
+    if (currentUserId === userId) {
+      Alert.alert("Error", "You cannot block yourself.");
+      return;
+    }
+
+    try {
+      // Fetch current blocked_users array
+      const { data: userData, error: fetchError } = await supabase
+        .from("profile")
+        .select("blocked_users")
+        .eq("id", currentUserId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      let blockedUsers = userData?.blocked_users || [];
+
+      if (isBlocked) {
+        // Unblock: Remove userId from blocked_users
+        blockedUsers = blockedUsers.filter((id: string) => id !== userId);
+        Alert.alert(
+          "Unblock User",
+          `Are you sure you want to unblock ${user?.username}?`,
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Unblock",
+              style: "destructive",
+              onPress: async () => {
+                const { error: updateError } = await supabase
+                  .from("profile")
+                  .update({ blocked_users: blockedUsers })
+                  .eq("id", currentUserId);
+
+                if (updateError) throw updateError;
+
+                setIsBlocked(false);
+                Alert.alert("Success", `${user?.username} has been unblocked.`);
+                setMenuVisible(false);
+              },
+            },
+          ]
+        );
+      } else {
+        // Block: Add userId to blocked_users if not already present
+        if (!blockedUsers.includes(userId)) {
+          blockedUsers.push(userId);
+        }
+
+        const { error: updateError } = await supabase
+          .from("profile")
+          .update({ blocked_users: blockedUsers })
+          .eq("id", currentUserId);
+
+        if (updateError) throw updateError;
+
+        setIsBlocked(true);
+        Alert.alert("Success", `${user?.username} has been blocked.`);
+        setMenuVisible(false);
+      }
+    } catch (error) {
+      console.error("Error handling block/unblock:", error);
+      Alert.alert("Error", "Failed to update block status. Please try again.");
+    }
   };
 
   if (!user && !loading) return null;
@@ -227,6 +309,7 @@ const ViewProfilePopup = ({
                   {user?.first_name} {user?.last_name}
                 </Text>
                 <Text style={styles.popupUsername}>@{user?.username}</Text>
+                {isBlocked && <Text style={styles.blockedBadge}>Blocked</Text>}
                 <TouchableOpacity
                   style={styles.actionMenuButton}
                   onPress={() => setMenuVisible(true)}
@@ -276,7 +359,7 @@ const ViewProfilePopup = ({
           onRequestClose={() => {
             setMenuVisible(false);
             setReportData({ reason: "", details: "" });
-            setIsReporting(false); // Reset reporting state
+            setIsReporting(false);
             Keyboard.dismiss();
           }}
         >
@@ -330,7 +413,7 @@ const ViewProfilePopup = ({
                         onPress={handleBlock}
                       >
                         <Text style={styles.actionMenuItemText}>
-                          Block User
+                          {isBlocked ? "Unblock User" : "Block User"}
                         </Text>
                       </TouchableOpacity>
                     </>
@@ -386,7 +469,7 @@ const ViewProfilePopup = ({
                       onPress={() => {
                         setMenuVisible(false);
                         setReportData({ reason: "", details: "" });
-                        setIsReporting(false); // Reset reporting state
+                        setIsReporting(false);
                         Keyboard.dismiss();
                       }}
                     >
@@ -476,6 +559,17 @@ export default function HomeFeedScreen() {
 
   const fetchFeed = async (currentUserId: string) => {
     try {
+      // Fetch current user's blocked_users list
+      const { data: userData, error: userError } = await supabase
+        .from("profile")
+        .select("blocked_users")
+        .eq("id", currentUserId)
+        .single();
+
+      if (userError) throw userError;
+
+      const blockedUsers = userData?.blocked_users || [];
+
       const { data: friendData, error: friendError } = await supabase
         .from("friendships")
         .select("user_id, friend_id")
@@ -494,7 +588,12 @@ export default function HomeFeedScreen() {
           return acc;
         }, []) || [];
 
-      if (!friendIds.length) {
+      // Filter out blocked users from friendIds
+      const filteredFriendIds = friendIds.filter(
+        (id) => !blockedUsers.includes(id)
+      );
+
+      if (!filteredFriendIds.length) {
         setPosts([]);
         return;
       }
@@ -520,7 +619,7 @@ export default function HomeFeedScreen() {
           )
         `
         )
-        .in("user_id", friendIds)
+        .in("user_id", filteredFriendIds)
         .order("created_at", { ascending: false });
 
       if (postError) throw postError;
@@ -1245,6 +1344,16 @@ const styles = StyleSheet.create({
   popupUsername: {
     fontSize: 16,
     color: "#64748b",
+    marginBottom: 8,
+  },
+  blockedBadge: {
+    backgroundColor: "#dc2626", // Red background for visibility
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
     marginBottom: 8,
   },
   statsContainer: {
