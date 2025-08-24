@@ -2,30 +2,33 @@ import { supabase } from '@/services/supabase';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    FlatList,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 type UserRequest = {
   id: string;
   name: string;
   username: string;
-  requestId: number;
+  user1_id: string;
+  user2_id: string;
 };
 
 type Profile = {
   first_name: string;
   last_name: string;
   username: string;
+  id: string;
 };
 
 type FriendshipRecord = {
-  id: number;
-  user_id: string;
+  user1_id: string;
+  user2_id: string;
+  requested_by: string;
   profile: Profile | Profile[] | null;
 };
 
@@ -34,6 +37,7 @@ export default function FriendRequestsScreen() {
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [workingId, setWorkingId] = useState<string | null>(null); // Prevent concurrent actions
 
   useEffect(() => {
     const init = async () => {
@@ -52,46 +56,87 @@ export default function FriendRequestsScreen() {
   const fetchFriendRequests = async (uid: string) => {
     setLoading(true);
     const { data, error } = await supabase
-      .from('friendships')
+      .from('friends')
       .select(`
-        id,
-        user_id,
-        profile: user_id (
+        user1_id,
+        user2_id,
+        requested_by,
+        profile: profile!friends_requested_by_fkey (
+          id,
           first_name,
           last_name,
           username
         )
       `)
-      .eq('friend_id', uid)
-      .eq('status', 'pending');
+      .eq('status', 'pending')
+      .neq('requested_by', uid) // Only incoming requests
+      .or(`user1_id.eq.${uid},user2_id.eq.${uid}`);
 
     if (error) {
       console.error('Error fetching friend requests:', error);
+      setLoading(false);
       return;
     }
 
-    const formatted: UserRequest[] = (data as FriendshipRecord[]).map((req) => {
-      const profile = Array.isArray(req.profile) ? req.profile[0] : req.profile;
-      return {
-        id: req.user_id,
-        name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
-        username: profile?.username ?? '',
-        requestId: req.id,
-      };
-    });
+    const formatted: UserRequest[] = (data as FriendshipRecord[])
+      .filter(req => req.requested_by !== uid) // Ensure only incoming
+      .map((req) => {
+        const profile = Array.isArray(req.profile) ? req.profile[0] : req.profile;
+        return {
+          id: profile?.id ?? req.requested_by,
+          name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+          username: profile?.username ?? '',
+          user1_id: req.user1_id,
+          user2_id: req.user2_id,
+        };
+      });
 
     setRequests(formatted);
     setLoading(false);
   };
 
-  const handleResponse = async (requestId: number, accept: boolean) => {
-    if (accept) {
-      await supabase.from('friendships').update({ status: 'accepted' }).eq('id', requestId);
-    } else {
-      await supabase.from('friendships').delete().eq('id', requestId);
-    }
+  const handleResponse = async (user1_id: string, user2_id: string, accept: boolean) => {
+    if (!currentUserId || workingId) return;
 
-    setRequests((prev) => prev.filter((r) => r.requestId !== requestId));
+    try {
+      setWorkingId(user1_id < user2_id ? `${user1_id}-${user2_id}` : `${user2_id}-${user1_id}`);
+
+      if (accept) {
+        const { error } = await supabase
+          .from('friends')
+          .update({ status: 'accepted' })
+          .eq('user1_id', user1_id)
+          .eq('user2_id', user2_id);
+        if (error) {
+          console.error('Accept request error:', error);
+          return;
+        }
+      } else {
+        const { error } = await supabase
+          .from('friends')
+          .delete()
+          .eq('user1_id', user1_id)
+          .eq('user2_id', user2_id);
+        if (error) {
+          console.error('Decline request error:', error);
+          return;
+        }
+      }
+
+      // Remove request from UI and refresh
+      setRequests((prev) =>
+        prev.filter(
+          (r) =>
+            !(
+              (r.user1_id === user1_id && r.user2_id === user2_id) ||
+              (r.user1_id === user2_id && r.user2_id === user1_id)
+            )
+        )
+      );
+      await fetchFriendRequests(currentUserId!);
+    } finally {
+      setWorkingId(null);
+    }
   };
 
   const getInitials = (name: string) => {
@@ -113,14 +158,16 @@ export default function FriendRequestsScreen() {
       </View>
       <View style={styles.buttonRow}>
         <TouchableOpacity
-          style={[styles.button, styles.accept]}
-          onPress={() => handleResponse(item.requestId, true)}
+          style={[styles.button, styles.accept, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
+          disabled={!!workingId}
+          onPress={() => handleResponse(item.user1_id, item.user2_id, true)}
         >
           <Text style={styles.buttonText}>Accept</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.button, styles.decline]}
-          onPress={() => handleResponse(item.requestId, false)}
+          style={[styles.button, styles.decline, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
+          disabled={!!workingId}
+          onPress={() => handleResponse(item.user1_id, item.user2_id, false)}
         >
           <Text style={styles.buttonText}>Decline</Text>
         </TouchableOpacity>
@@ -141,7 +188,7 @@ export default function FriendRequestsScreen() {
       ) : (
         <FlatList
           data={requests}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => `${item.user1_id}-${item.user2_id}`}
           renderItem={renderRequest}
           ListEmptyComponent={<Text>No pending requests.</Text>}
           contentContainerStyle={{ paddingBottom: 100 }}
@@ -243,5 +290,8 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
 });
