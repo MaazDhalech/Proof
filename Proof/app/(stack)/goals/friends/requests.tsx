@@ -16,6 +16,7 @@ type UserRequest = {
   username: string;
   user1_id: string;
   user2_id: string;
+  direction: 'incoming' | 'outgoing';
 };
 
 type Profile = {
@@ -69,7 +70,6 @@ export default function FriendRequestsScreen() {
         )
       `)
       .eq('status', 'pending')
-      .neq('requested_by', uid) // Only incoming requests
       .or(`user1_id.eq.${uid},user2_id.eq.${uid}`);
 
     if (error) {
@@ -78,30 +78,31 @@ export default function FriendRequestsScreen() {
       return;
     }
 
-    const formatted: UserRequest[] = (data as FriendshipRecord[])
-      .filter(req => req.requested_by !== uid) // Ensure only incoming
-      .map((req) => {
-        const profile = Array.isArray(req.profile) ? req.profile[0] : req.profile;
-        return {
-          id: profile?.id ?? req.requested_by,
-          name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
-          username: profile?.username ?? '',
-          user1_id: req.user1_id,
-          user2_id: req.user2_id,
-        };
-      });
+    const formatted: UserRequest[] = (data as FriendshipRecord[]).map((req) => {
+      const profile = Array.isArray(req.profile) ? req.profile[0] : req.profile;
+      const isOutgoing = req.requested_by === uid;
+      return {
+        id: profile?.id ?? req.requested_by,
+        name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+        username: profile?.username ?? '',
+        user1_id: req.user1_id,
+        user2_id: req.user2_id,
+        direction: isOutgoing ? 'outgoing' : 'incoming',
+      };
+    });
 
     setRequests(formatted);
     setLoading(false);
   };
 
-  const handleResponse = async (user1_id: string, user2_id: string, accept: boolean) => {
+  const handleResponse = async (user1_id: string, user2_id: string, action: 'accept' | 'decline' | 'cancel') => {
     if (!currentUserId || workingId) return;
 
     try {
-      setWorkingId(user1_id < user2_id ? `${user1_id}-${user2_id}` : `${user2_id}-${user1_id}`);
+      const compositeId = user1_id < user2_id ? `${user1_id}-${user2_id}` : `${user2_id}-${user1_id}`;
+      setWorkingId(compositeId);
 
-      if (accept) {
+      if (action === 'accept') {
         const { error } = await supabase
           .from('friends')
           .update({ status: 'accepted' })
@@ -111,14 +112,14 @@ export default function FriendRequestsScreen() {
           console.error('Accept request error:', error);
           return;
         }
-      } else {
+      } else if (action === 'decline' || action === 'cancel') {
         const { error } = await supabase
           .from('friends')
           .delete()
           .eq('user1_id', user1_id)
           .eq('user2_id', user2_id);
         if (error) {
-          console.error('Decline request error:', error);
+          console.error(`${action === 'decline' ? 'Decline' : 'Cancel'} request error:`, error);
           return;
         }
       }
@@ -153,24 +154,36 @@ export default function FriendRequestsScreen() {
         </View>
         <View style={styles.textContainer}>
           <Text style={styles.name}>{item.name}</Text>
-          <Text style={styles.username}>@{item.username}</Text>
+          <Text style={styles.username}>@{item.username} • {item.direction === 'incoming' ? 'Incoming' : 'Outgoing'} Request</Text>
         </View>
       </View>
       <View style={styles.buttonRow}>
-        <TouchableOpacity
-          style={[styles.button, styles.accept, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
-          disabled={!!workingId}
-          onPress={() => handleResponse(item.user1_id, item.user2_id, true)}
-        >
-          <Text style={styles.buttonText}>Accept</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.button, styles.decline, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
-          disabled={!!workingId}
-          onPress={() => handleResponse(item.user1_id, item.user2_id, false)}
-        >
-          <Text style={styles.buttonText}>Decline</Text>
-        </TouchableOpacity>
+        {item.direction === 'incoming' ? (
+          <>
+            <TouchableOpacity
+              style={[styles.button, styles.accept, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
+              disabled={!!workingId}
+              onPress={() => handleResponse(item.user1_id, item.user2_id, 'accept')}
+            >
+              <Text style={styles.buttonText}>Accept</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.button, styles.decline, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
+              disabled={!!workingId}
+              onPress={() => handleResponse(item.user1_id, item.user2_id, 'decline')}
+            >
+              <Text style={styles.buttonText}>Decline</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            style={[styles.button, styles.decline, workingId === `${item.user1_id}-${item.user2_id}` && styles.buttonDisabled]}
+            disabled={!!workingId}
+            onPress={() => handleResponse(item.user1_id, item.user2_id, 'cancel')}
+          >
+            <Text style={styles.buttonText}>Cancel Request</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -271,15 +284,15 @@ const styles = StyleSheet.create({
   },
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     marginTop: 12,
   },
   button: {
     padding: 10,
     borderRadius: 6,
-    flex: 1,
     marginHorizontal: 5,
     alignItems: 'center',
+    minWidth: 100,
   },
   accept: {
     backgroundColor: '#28a745',

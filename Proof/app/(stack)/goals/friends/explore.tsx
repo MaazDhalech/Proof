@@ -231,6 +231,14 @@ export default function ExploreFriendsScreen() {
     return idx === cleanSingle.length ? Math.min(score, 40) : 0;
   }
 
+  // Select 3 random users for recommendations when search is empty
+  const recommendedUsers = useMemo(() => {
+    if (searchText.trim()) return [];
+    const shuffled = [...allUsers].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 3);
+  }, [searchText, allUsers]);
+
+  // Filter users based on search query
   const filteredUsers = useMemo(() => {
     const q = searchText.trim();
     if (!q) return [];
@@ -291,12 +299,26 @@ export default function ExploreFriendsScreen() {
         onChangeText={setSearchText}
       />
 
-      <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.id}
-        renderItem={renderUser}
-        contentContainerStyle={{ paddingBottom: 100 }}
-      />
+      {searchText.trim() ? (
+        <FlatList
+          data={filteredUsers}
+          keyExtractor={(item) => item.id}
+          renderItem={renderUser}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          ListEmptyComponent={<Text style={styles.emptyText}>No users found.</Text>}
+        />
+      ) : (
+        <>
+          <Text style={styles.recommendationHeader}>Recommendations</Text>
+          <FlatList
+            data={recommendedUsers}
+            keyExtractor={(item) => item.id}
+            renderItem={renderUser}
+            contentContainerStyle={{ paddingBottom: 100 }}
+            ListEmptyComponent={<Text style={styles.emptyText}>No recommendations available.</Text>}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -311,15 +333,40 @@ const styles = StyleSheet.create({
     height: 40, borderColor: '#ccc', borderWidth: 1, borderRadius: 8,
     paddingHorizontal: 12, marginBottom: 16, backgroundColor: '#f9f9f9',
   },
-  card: { backgroundColor: '#f1f1f1', padding: 16, borderRadius: 10, marginBottom: 12 },
+  recommendationHeader: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 12,
+  },
+  card: { 
+    backgroundColor: '#f1f1f1', 
+    padding: 16, 
+    borderRadius: 10, 
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
   name: { fontSize: 18, fontWeight: '600', color: '#111' },
   username: { fontSize: 14, color: '#666', marginTop: 4 },
   button: {
-    marginTop: 8, backgroundColor: '#007aff', padding: 10,
-    borderRadius: 6, alignItems: 'center',
+    marginTop: 8, 
+    backgroundColor: '#007aff', 
+    padding: 10,
+    borderRadius: 6, 
+    alignItems: 'center',
   },
   buttonRespond: { backgroundColor: '#ffac33' },
   buttonCancel: { backgroundColor: '#dc3545' },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontWeight: '600' },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 20,
+  },
 });
