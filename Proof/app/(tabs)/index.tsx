@@ -264,6 +264,20 @@ const ViewProfilePopup = ({
           blockedUsers.push(userId);
         }
 
+        // Determine the correct order for user1_id and user2_id
+        const user1 = currentUserId < userId ? currentUserId : userId;
+        const user2 = currentUserId < userId ? userId : currentUserId;
+
+        // Check if a friendship exists and delete it
+        const { error: deleteFriendshipError } = await supabase
+          .from("friends")
+          .delete()
+          .eq("user1_id", user1)
+          .eq("user2_id", user2);
+
+        if (deleteFriendshipError) throw deleteFriendshipError;
+
+        // Update blocked_users
         const { error: updateError } = await supabase
           .from("profile")
           .update({ blocked_users: blockedUsers })
@@ -571,19 +585,19 @@ export default function HomeFeedScreen() {
       const blockedUsers = userData?.blocked_users || [];
 
       const { data: friendData, error: friendError } = await supabase
-        .from("friendships")
-        .select("user_id, friend_id")
-        .or(`user_id.eq.${currentUserId},friend_id.eq.${currentUserId}`)
+        .from("friends")
+        .select("user1_id, user2_id")
+        .or(`user1_id.eq.${currentUserId},user2_id.eq.${currentUserId}`)
         .eq("status", "accepted");
 
       if (friendError) throw friendError;
 
       const friendIds =
         friendData?.reduce((acc: string[], entry) => {
-          if (entry.user_id === currentUserId) {
-            acc.push(entry.friend_id);
-          } else if (entry.friend_id === currentUserId) {
-            acc.push(entry.user_id);
+          if (entry.user1_id === currentUserId) {
+            acc.push(entry.user2_id);
+          } else if (entry.user2_id === currentUserId) {
+            acc.push(entry.user1_id);
           }
           return acc;
         }, []) || [];
