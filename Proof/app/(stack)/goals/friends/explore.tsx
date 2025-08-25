@@ -39,45 +39,43 @@ export default function ExploreFriendsScreen() {
     init();
   }, []);
 
-  // Include users who are NOT accepted friends.
-  // People with pending (either direction) are INCLUDED and tagged.
+  // Fetch users who are NOT accepted friends.
+  // Include pending relations (tagged as incoming or outgoing).
   const fetchUsersNotFriendsOrPending = async (uid: string) => {
-    // ACCEPTED (to EXCLUDE later)
+    // Fetch accepted relationships to exclude
     const { data: acceptedRels, error: accErr } = await supabase
-      .from('friendships')
-      .select('user_id, friend_id')
-      .or(
-        `and(user_id.eq.${uid},status.eq.accepted),and(friend_id.eq.${uid},status.eq.accepted)`
-      );
+      .from('friends')
+      .select('user1_id, user2_id')
+      .eq('status', 'accepted')
+      .or(`user1_id.eq.${uid},user2_id.eq.${uid}`);
     if (accErr) {
       console.error('ACCEPTED fetch error:', accErr);
       return;
     }
     const acceptedSet = new Set<string>(
-      (acceptedRels ?? []).map(r => (r.user_id === uid ? r.friend_id : r.user_id))
+      (acceptedRels ?? []).map(r => (r.user1_id === uid ? r.user2_id : r.user1_id))
     );
 
-    // PENDING (to TAG)
+    // Fetch pending relationships to tag
     const { data: pendingRels, error: pendErr } = await supabase
-      .from('friendships')
-      .select('user_id, friend_id')
-      .or(
-        `and(user_id.eq.${uid},status.eq.pending),and(friend_id.eq.${uid},status.eq.pending)`
-      );
+      .from('friends')
+      .select('user1_id, user2_id, requested_by')
+      .eq('status', 'pending')
+      .or(`user1_id.eq.${uid},user2_id.eq.${uid}`);
     if (pendErr) {
       console.error('PENDING fetch error:', pendErr);
       return;
     }
     const pendingMap = new Map<string, PendingKind>();
     for (const r of pendingRels ?? []) {
-      const other = r.user_id === uid ? r.friend_id : r.user_id;
-      const dir: PendingKind = r.user_id === uid ? 'outgoing' : 'incoming';
+      const other = r.user1_id === uid ? r.user2_id : r.user1_id;
+      const dir: PendingKind = r.requested_by === uid ? 'outgoing' : 'incoming';
       pendingMap.set(other, dir);
     }
 
-    // PROFILES (filter client-side to keep pending)
+    // Fetch profiles, filter client-side to keep pending
     const { data: profiles, error: profErr } = await supabase
-      .from('profile') // singular in your schema
+      .from('profile')
       .select('id, username, first_name, last_name')
       .neq('id', uid);
     if (profErr) {
@@ -86,7 +84,7 @@ export default function ExploreFriendsScreen() {
     }
 
     const formatted: User[] = (profiles ?? [])
-      .filter(u => !acceptedSet.has(u.id)) // hide accepted
+      .filter(u => !acceptedSet.has(u.id)) // hide accepted friends
       .map(u => ({
         id: u.id as string,
         username: u.username as string,
@@ -97,7 +95,7 @@ export default function ExploreFriendsScreen() {
     setAllUsers(formatted);
   };
 
-  // Toggle: send if none, open "Respond" if incoming, cancel if outgoing
+  // Handle send, cancel, or respond to friend requests
   const toggleRequest = async (otherId: string) => {
     if (!currentUserId) return;
     const row = allUsers.find(u => u.id === otherId);
@@ -107,25 +105,23 @@ export default function ExploreFriendsScreen() {
       setWorkingId(otherId);
 
       if (row.pending === 'incoming') {
-        // They requested you → take them to requests screen (or accept inline if you prefer)
-        router.push('/friends/requests');
+        // Navigate to requests screen for incoming requests
+        router.push('/(stack)/goals/friends/requests');
         return;
       }
 
       if (row.pending === 'outgoing') {
-        // CANCEL your pending request
-        // Optimistic UI: clear pending immediately
+        // Cancel outgoing request (delete)
         setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: null } : u)));
 
         const { error } = await supabase
-          .from('friendships')
+          .from('friends')
           .delete()
-          .eq('user_id', currentUserId)
-          .eq('friend_id', otherId)
-          .eq('status', 'pending');
+          .or(`and(user1_id.eq.${currentUserId},user2_id.eq.${otherId}),and(user1_id.eq.${otherId},user2_id.eq.${currentUserId})`)
+          .eq('status', 'pending')
+          .eq('requested_by', currentUserId);
 
         if (error) {
-          // revert on failure
           setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: 'outgoing' } : u)));
           console.error('Cancel request error:', error);
           Alert.alert('Could not cancel request', error.message ?? 'Unknown error');
@@ -133,15 +129,22 @@ export default function ExploreFriendsScreen() {
         return;
       }
 
-      // No relation → SEND request
+      // Send new friend request
       setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: 'outgoing' } : u)));
 
-      const { error } = await supabase.from('friendships').insert([
-        { user_id: currentUserId, friend_id: otherId, status: 'pending' },
+      // Ensure user1_id < user2_id
+      const [user1, user2] = currentUserId < otherId ? [currentUserId, otherId] : [otherId, currentUserId];
+      
+      const { error } = await supabase.from('friends').insert([
+        { 
+          user1_id: user1, 
+          user2_id: user2, 
+          status: 'pending', 
+          requested_by: currentUserId 
+        },
       ]);
 
       if (error) {
-        // Unique violation or other error → revert
         setAllUsers(prev => prev.map(u => (u.id === otherId ? { ...u, pending: null } : u)));
         console.error('Send request error:', error);
         Alert.alert('Could not send request', error.message ?? 'Unknown error');
@@ -151,7 +154,7 @@ export default function ExploreFriendsScreen() {
     }
   };
 
-  // --- Fuzzy search (unchanged) ---
+  // Fuzzy search (unchanged)
   function fuzzyScore(text: string, search: string) {
     if (!search) return 1;
     if (!text) return 0;
@@ -228,6 +231,14 @@ export default function ExploreFriendsScreen() {
     return idx === cleanSingle.length ? Math.min(score, 40) : 0;
   }
 
+  // Select 3 random users for recommendations when search is empty
+  const recommendedUsers = useMemo(() => {
+    if (searchText.trim()) return [];
+    const shuffled = [...allUsers].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 3);
+  }, [searchText, allUsers]);
+
+  // Filter users based on search query
   const filteredUsers = useMemo(() => {
     const q = searchText.trim();
     if (!q) return [];
@@ -288,12 +299,26 @@ export default function ExploreFriendsScreen() {
         onChangeText={setSearchText}
       />
 
-      <FlatList
-        data={filteredUsers}
-        keyExtractor={(item) => item.id}
-        renderItem={renderUser}
-        contentContainerStyle={{ paddingBottom: 100 }}
-      />
+      {searchText.trim() ? (
+        <FlatList
+          data={filteredUsers}
+          keyExtractor={(item) => item.id}
+          renderItem={renderUser}
+          contentContainerStyle={{ paddingBottom: 100 }}
+          ListEmptyComponent={<Text style={styles.emptyText}>No users found.</Text>}
+        />
+      ) : (
+        <>
+          <Text style={styles.recommendationHeader}>Recommendations</Text>
+          <FlatList
+            data={recommendedUsers}
+            keyExtractor={(item) => item.id}
+            renderItem={renderUser}
+            contentContainerStyle={{ paddingBottom: 100 }}
+            ListEmptyComponent={<Text style={styles.emptyText}>No recommendations available.</Text>}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -308,15 +333,40 @@ const styles = StyleSheet.create({
     height: 40, borderColor: '#ccc', borderWidth: 1, borderRadius: 8,
     paddingHorizontal: 12, marginBottom: 16, backgroundColor: '#f9f9f9',
   },
-  card: { backgroundColor: '#f1f1f1', padding: 16, borderRadius: 10, marginBottom: 12 },
+  recommendationHeader: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#111',
+    marginBottom: 12,
+  },
+  card: { 
+    backgroundColor: '#f1f1f1', 
+    padding: 16, 
+    borderRadius: 10, 
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
   name: { fontSize: 18, fontWeight: '600', color: '#111' },
   username: { fontSize: 14, color: '#666', marginTop: 4 },
   button: {
-    marginTop: 8, backgroundColor: '#007aff', padding: 10,
-    borderRadius: 6, alignItems: 'center',
+    marginTop: 8, 
+    backgroundColor: '#007aff', 
+    padding: 10,
+    borderRadius: 6, 
+    alignItems: 'center',
   },
   buttonRespond: { backgroundColor: '#ffac33' },
   buttonCancel: { backgroundColor: '#dc3545' },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: '#fff', fontWeight: '600' },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 20,
+  },
 });

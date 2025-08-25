@@ -40,6 +40,7 @@ export default function FriendsScreen() {
   const [userId, setUserId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [workingId, setWorkingId] = useState<string | null>(null); // Prevent concurrent actions
   const router = useRouter();
 
   useEffect(() => {
@@ -72,46 +73,45 @@ export default function FriendsScreen() {
 
   const fetchFriendsWithGoals = async (uid: string) => {
     try {
-      // 1) Get all accepted friendships where the user is either side
+      // Get all accepted friendships where the user is either user1_id or user2_id
       const { data: rows, error: friendsError } = await supabase
-        .from('friendships')
+        .from('friends')
         .select(`
-          id,
-          user_id,
-          friend_id,
+          user1_id,
+          user2_id,
           status,
-          sender:profile!friendships_user_id_fkey (
+          profile:profile!friends_user1_fkey (
             id,
             username,
             first_name,
             last_name
           ),
-          receiver:profile!friendships_friend_id_fkey (
+          profile2:profile!friends_user2_fkey (
             id,
             username,
             first_name,
             last_name
           )
         `)
-        .or(`user_id.eq.${uid},friend_id.eq.${uid}`)
-        .eq('status', 'accepted');
+        .eq('status', 'accepted')
+        .or(`user1_id.eq.${uid},user2_id.eq.${uid}`);
 
       if (friendsError) throw friendsError;
       const rowsSafe = rows || [];
 
-      // 2) Dedupe by the OTHER user's id
+      // Dedupe by the OTHER user's id
       const uniqueByOtherId = new Map<string, any>();
       for (const row of rowsSafe) {
-        const otherId = row.user_id === uid ? row.friend_id : row.user_id;
+        const otherId = row.user1_id === uid ? row.user2_id : row.user1_id;
         if (!uniqueByOtherId.has(otherId)) {
           uniqueByOtherId.set(otherId, row);
         }
       }
 
-      // 3) Build a list of unique friend user IDs
+      // Build a list of unique friend user IDs
       const friendIds = Array.from(uniqueByOtherId.keys());
 
-      // 4) Fetch challenges for all those friends
+      // Fetch challenges for all those friends
       let challengesData: any[] = [];
       if (friendIds.length > 0) {
         const { data, error: challengesError } = await supabase
@@ -123,11 +123,12 @@ export default function FriendsScreen() {
         challengesData = data || [];
       }
 
-      // 5) Format: one Friend per unique person
+      // Format: one Friend per unique person
       const formatted: Friend[] = Array.from(uniqueByOtherId.entries()).map(
         ([otherId, row]) => {
-          const isUserSender = row.user_id === uid;
-          const profile = isUserSender ? row.receiver : row.sender;
+          const isUser1 = row.user1_id === uid;
+          const profile = isUser1 ? row.profile2 : row.profile;
+          const friendshipId = `${row.user1_id}-${row.user2_id}`;
 
           const friendChallenges = challengesData.filter(
             (ch) => ch.user_id === profile.id
@@ -137,7 +138,7 @@ export default function FriendsScreen() {
             id: profile.id, // other user's id
             name: `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
             username: profile?.username ?? '',
-            friendshipId: profile.id, // stable key for FlatList
+            friendshipId, // composite key for FlatList
             challenges: friendChallenges,
           };
         }
@@ -149,21 +150,27 @@ export default function FriendsScreen() {
     }
   };
 
-
   const handleUnfriend = async (friendId: string) => {
-    if (!userId) return;
+    if (!userId || workingId) return;
 
-    const { error } = await supabase
-      .from('friendships')
-      .delete()
-      .or(
-        `and(user_id.eq.${userId},friend_id.eq.${friendId}),and(user_id.eq.${friendId},friend_id.eq.${userId})`
-      );
+    try {
+      setWorkingId(friendId);
 
-    if (error) {
-      console.error('Error unfriending:', error);
-    } else {
-      setFriends((prev) => prev.filter((f) => f.id !== friendId));
+      const { error } = await supabase
+        .from('friends')
+        .delete()
+        .or(
+          `and(user1_id.eq.${userId},user2_id.eq.${friendId}),and(user1_id.eq.${friendId},user2_id.eq.${userId})`
+        );
+
+      if (error) {
+        console.error('Error unfriending:', error);
+      } else {
+        setFriends((prev) => prev.filter((f) => f.id !== friendId));
+        await fetchFriendsWithGoals(userId); // Refresh data
+      }
+    } finally {
+      setWorkingId(null);
     }
   };
 
@@ -224,7 +231,7 @@ export default function FriendsScreen() {
   };
 
   // Robust fuzzy search with multi-word support
-  function fuzzyScore(text, search) {
+  function fuzzyScore(text: string, search: string) {
     if (!search) return 1;
     if (!text) return 0;
     
@@ -275,10 +282,10 @@ export default function FriendsScreen() {
     }
     
     // Simple edit distance for typo tolerance
-    function editDistance(str1, str2) {
+    function editDistance(str1: string, str2: string) {
       if (Math.abs(str1.length - str2.length) > 3) return Infinity;
       
-      const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
+      const matrix = Array(str2.length + 1).fill(0).map(() => Array(str1.length + 1).fill(0));
       for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
       for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
       
@@ -412,7 +419,8 @@ export default function FriendsScreen() {
           <Text style={styles.friendUsername}>@{item.username}</Text>
         </View>
         <TouchableOpacity
-          style={styles.unfriendButton}
+          style={[styles.unfriendButton, workingId === item.id && styles.buttonDisabled]}
+          disabled={!!workingId}
           onPress={() => handleUnfriend(item.id)}
         >
           <Text style={styles.unfriendText}>Remove</Text>
@@ -636,6 +644,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   goalsSection: {
     marginTop: 8,
   },
@@ -783,10 +794,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e9ecef',
     borderStyle: 'dashed',
-  },
-  noGoalsEmoji: {
-    fontSize: 28,
-    marginBottom: 8,
   },
   noGoalsText: {
     fontSize: 14,
