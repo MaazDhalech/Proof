@@ -18,12 +18,18 @@ type Goal = {
   description: string;
   start_date: string;
   end_date: string | null; // ongoing goals allowed
-  frequency: number;
+  frequency: number; // quantity per increment
   current_streak: number;
   total_checkins: number;
   last_day: string | null;
   created_at: string;
+  increment: string; // "daily", "weekly", or "arbitrary"
 };
+
+type WeeklyGoal = {
+  id: string;
+  prevWeekPosts: number;
+}
 
 type Mode = "current" | "archived";
 
@@ -35,6 +41,7 @@ export default function GoalsPage() {
   const [userId, setUserId] = useState<string | undefined>();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("current");
+  const [weeklyGoals, setWeeklyGoals] = useState<WeeklyGoal[]>([]);
 
   useEffect(() => {
     const init = async () => {
@@ -72,6 +79,7 @@ export default function GoalsPage() {
     if (!userId) return;
     setRefreshing(true);
     await fetchGoals(userId);
+    await getPostsInPreviousWeek(userId)
     setRefreshing(false);
   };
 
@@ -83,14 +91,14 @@ export default function GoalsPage() {
       setGoals((prev) => prev.filter((g) => g.id !== goalId));
     } catch (e) {
       console.error("Delete failed:", e);
-      Alert.alert("Delete failed", "Couldn’t delete the goal. Please try again.");
+      Alert.alert("Delete failed", "Could not delete the goal. Please try again.");
     } finally {
       setDeletingId(null);
     }
   };
 
   const confirmDelete = (goalId: string, name: string) => {
-    Alert.alert("Delete goal?", `This will permanently delete “${name}”.`, [
+    Alert.alert("Delete goal?", `This will permanently delete "${name}".`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: () => deleteGoal(goalId) },
     ]);
@@ -108,33 +116,151 @@ export default function GoalsPage() {
     return getLocalDateYYYYMMDD() > g.end_date;
   };
 
+  const getCurrentIncrementStart = (goal: Goal) => {
+    const today = new Date(getLocalDateYYYYMMDD());
+    
+    if (goal.increment === "daily") {
+      return today.toISOString().slice(0, 10);
+    } else if (goal.increment === "weekly") {
+      // Calculate current week based on goal start date
+      const goalStartDate = new Date(goal.start_date);
+      const msPerDay = 1000 * 60 * 60 * 24;
+      const daysSinceStart = Math.floor((today.getTime() - goalStartDate.getTime()) / msPerDay);
+      
+      if (daysSinceStart < 0) {
+        // If today is before goal start, return goal start date
+        return goal.start_date;
+      }
+      
+      // Calculate which week we're in (0-based) and get that week's start date
+      const weekNumber = Math.floor(daysSinceStart / 7);
+      const currentWeekStart = new Date(goalStartDate);
+      currentWeekStart.setDate(goalStartDate.getDate() + (weekNumber * 7));
+      
+      return currentWeekStart.toISOString().slice(0, 10);
+    }
+    
+    // For arbitrary, return goal start date
+    return goal.start_date;
+  };
+
+  // Get posts count from the previous week (only needed for weekly goals streak logic)
+  const getPostsInPreviousWeek = async (uid: string) => {
+    
+    goals.forEach(async (g) => {
+      if (g.increment === "weekly") {
+        try {
+          const currentWeekStart = getCurrentIncrementStart(g);
+          const currentWeekStartDate = new Date(currentWeekStart);
+          
+          // Calculate previous week's start and end
+          const previousWeekStart = new Date(currentWeekStartDate);
+          previousWeekStart.setDate(currentWeekStartDate.getDate() - 7);
+          
+          const previousWeekEnd = new Date(previousWeekStart);
+          previousWeekEnd.setDate(previousWeekStart.getDate() + 6);
+          
+          const previousWeekStartStr = previousWeekStart.toISOString().slice(0, 10);
+          const previousWeekEndStr = previousWeekEnd.toISOString().slice(0, 10);
+
+          const { data, error } = await supabase
+            .from("proof")
+            .select("id")
+            .eq("user_id", uid)
+            .eq("challenge_id", g.id)
+            .gte("created_at", previousWeekStartStr)
+            .lte("created_at", previousWeekEndStr + "T23:59:59.999Z");
+
+          if (error) throw error;
+          const payload: WeeklyGoal = { id: g.id, prevWeekPosts: data?.length || 0 };
+          setWeeklyGoals([...weeklyGoals, payload]);
+        } catch (error) {
+          console.error("Error fetching posts in previous week:", error);
+        }
+      }
+    });
+    
+  };
+
   const calculateProgress = (goal: Goal) => {
     const startDate = new Date(goal.start_date);
+    const today = new Date(getLocalDateYYYYMMDD());
 
     if (!goal.end_date) {
+      // Ongoing goal - show total posts vs total possible based on time elapsed
+      if (goal.increment === "arbitrary") {
+        return {
+          daysCompleted: goal.total_checkins || 0,
+          totalDays: 0,
+          progressPercentage: 0,
+          isComplete: false,
+          isIndefinite: true as const,
+        };
+      }
+      
+      // For ongoing daily/weekly goals, calculate based on time elapsed
+      const msPerDay = 1000 * 60 * 60 * 24;
+      const daysElapsed = Math.floor((today.getTime() - startDate.getTime()) / msPerDay) + 1;
+      
+      let totalPossiblePosts = 0;
+      if (goal.increment === "daily") {
+        // Daily goals: 1 post per day possible
+        totalPossiblePosts = daysElapsed;
+      } else if (goal.increment === "weekly") {
+        // Weekly goals: frequency posts per week
+        const weeksElapsed = Math.ceil(daysElapsed / 7);
+        totalPossiblePosts = weeksElapsed * goal.frequency;
+      }
+      
+      const progressPercentage = totalPossiblePosts > 0 
+        ? Math.min(100, ((goal.total_checkins || 0) / totalPossiblePosts) * 100)
+        : 0;
+      
       return {
         daysCompleted: goal.total_checkins || 0,
-        totalDays: 0,
-        progressPercentage: 0,
+        totalDays: totalPossiblePosts,
+        progressPercentage,
         isComplete: false,
-        isIndefinite: true as const,
+        isIndefinite: false as const,
       };
     }
 
     const endDate = new Date(goal.end_date);
-    const today = new Date();
-
-    const totalDays = Math.max(
-      1,
-      Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-    );
-    const daysCompleted = goal.total_checkins || 0;
-    const progressPercentage = Math.min(100, (daysCompleted / totalDays) * 100);
     const isComplete = today > endDate;
 
+    if (goal.increment === "arbitrary") {
+      // Arbitrary: Number of posts / target quantity
+      const progressPercentage = Math.min(100, ((goal.total_checkins || 0) / goal.frequency) * 100);
+      return {
+        daysCompleted: goal.total_checkins || 0,
+        totalDays: goal.frequency,
+        progressPercentage,
+        isComplete,
+        isIndefinite: false as const,
+      };
+    }
+
+    // Normal (daily/weekly): Calculate total possible posts for the timespan
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / msPerDay);
+    
+    let totalPossiblePosts = 0;
+    if (goal.increment === "daily") {
+      // Daily goals: 1 post per day for the duration
+      totalPossiblePosts = totalDays;
+    } else if (goal.increment === "weekly") {
+      // Weekly goals: frequency posts per week for the duration
+      const totalWeeks = Math.ceil(totalDays / 7);
+      totalPossiblePosts = totalWeeks * goal.frequency;
+    }
+    
+    const progressPercentage = totalPossiblePosts > 0 
+      ? Math.min(100, ((goal.total_checkins || 0) / totalPossiblePosts) * 100)
+      : 0;
+
     return {
-      daysCompleted,
-      totalDays,
+      daysCompleted: goal.total_checkins || 0,
+      totalDays: totalPossiblePosts,
       progressPercentage,
       isComplete,
       isIndefinite: false as const,
@@ -142,28 +268,104 @@ export default function GoalsPage() {
   };
 
   const getCheckInStatus = (goal: Goal) => {
-    if (!goal.last_day) {
-      return { canCheckIn: true, status: "available", message: "Check In", shouldResetStreak: false };
-    }
     const today = getLocalDateYYYYMMDD();
-    const lastCheckIn = goal.last_day.split("T")[0];
-
-    if (today === lastCheckIn) {
-      return { canCheckIn: false, status: "locked", message: "Checked In Today", shouldResetStreak: false };
+    
+    // Check if user already posted today (applies to all goal types)
+    if (goal.last_day) {
+      const lastCheckIn = goal.last_day.split("T")[0];
+      if (today === lastCheckIn) {
+        return { 
+          canCheckIn: false, 
+          status: "locked", 
+          message: "Already Posted Today", 
+          shouldResetStreak: false 
+        };
+      }
     }
 
+    // For arbitrary goals, check if goal is completed
+    if (goal.increment === "arbitrary") {
+      if (goal.total_checkins >= goal.frequency) {
+        return { 
+          canCheckIn: false, 
+          status: "completed", 
+          message: "Goal Completed", 
+          shouldResetStreak: false 
+        };
+      }
+      return { 
+        canCheckIn: true, 
+        status: "available", 
+        message: "Add Post", 
+        shouldResetStreak: false 
+      };
+    }
+
+    // For daily/weekly goals, check streak logic
+    if (!goal.last_day) {
+      return { 
+        canCheckIn: true, 
+        status: "available", 
+        message: "Add Post", 
+        shouldResetStreak: false 
+      };
+    }
+
+    const lastCheckIn = goal.last_day.split("T")[0];
     const todayDate = new Date(today);
     const lastCheckInDate = new Date(lastCheckIn);
     const daysDifference = Math.floor(
       (todayDate.getTime() - lastCheckInDate.getTime()) / (1000 * 60 * 60 * 24)
     );
-
-    if (daysDifference === 1) {
-      return { canCheckIn: true, status: "available", message: "Check In", shouldResetStreak: false };
-    } else if (daysDifference > 1) {
-      return { canCheckIn: true, status: "streak-reset", message: "Check In (Reset Streak)", shouldResetStreak: true };
+    
+    if (goal.increment === "daily") {
+      // For daily goals (frequency always 1), missing a day breaks the streak
+      if (daysDifference === 1) {
+        return { 
+          canCheckIn: true, 
+          status: "available", 
+          message: "Add Post", 
+          shouldResetStreak: false 
+        };
+      } else if (daysDifference > 1) {
+        return { 
+          canCheckIn: true, 
+          status: "streak-reset", 
+          message: "Add Post (Streak Reset)", 
+          shouldResetStreak: true 
+        };
+      }
     }
-    return { canCheckIn: false, status: "locked", message: "Locked", shouldResetStreak: false };
+    
+    if (goal.increment === "weekly") {
+      if (goal.last_day < getCurrentIncrementStart(goal) && goal.start_date != getCurrentIncrementStart(goal)) {
+        // Last check-in was before current week
+        // await getPostsInPreviousWeek(userId, goal)
+        const prevWeekPosts = weeklyGoals.find((wg) => wg.id === goal.id)?.prevWeekPosts || 0;
+        if (prevWeekPosts < goal.frequency) {
+          return {
+            canCheckIn: true, 
+            status: "streak-reset", 
+            message: "Add Post (Streak Reset)", 
+            shouldResetStreak: true 
+          };
+        }
+      }
+      
+      return { 
+        canCheckIn: true, 
+        status: "available", 
+        message: "Add Post", 
+        shouldResetStreak: false 
+      };
+    }
+    
+    return { 
+      canCheckIn: false, 
+      status: "locked", 
+      message: "Locked", 
+      shouldResetStreak: false 
+    };
   };
 
   const formatDate = (dateString?: string | null) => {
@@ -178,6 +380,17 @@ export default function GoalsPage() {
     if (streak >= 7) return "💪";
     if (streak >= 3) return "🌟";
     return "✨";
+  };
+
+  const getIncrementDisplayText = (increment: string, frequency: number) => {
+    if (increment === "arbitrary") {
+      return `${frequency} total`;
+    } else if (increment === "daily") {
+      return "Daily";
+    } else if (increment === "weekly") {
+      return `${frequency}x weekly`;
+    }
+    return `${frequency}x ${increment}`;
   };
 
   // Split goals into current and archived (memoized)
@@ -238,10 +451,10 @@ export default function GoalsPage() {
           <View style={styles.progressHeader}>
             <Text style={styles.progressLabel}>Progress</Text>
             {progress.isIndefinite ? (
-              <Text style={styles.progressStats}>{progress.daysCompleted} check-ins</Text>
+              <Text style={styles.progressStats}>{progress.daysCompleted} posts</Text>
             ) : (
               <Text style={styles.progressStats}>
-                {progress.daysCompleted}/{progress.totalDays} days ({Math.round(progress.progressPercentage)}%)
+                {progress.daysCompleted}/{progress.totalDays} posts ({Math.round(progress.progressPercentage)}%)
               </Text>
             )}
           </View>
@@ -262,14 +475,16 @@ export default function GoalsPage() {
         </View>
 
         <View style={styles.goalStats}>
-          <View style={styles.streakBadge}>
-            <Text style={styles.streakEmoji}>{getStreakEmoji(item.current_streak)}</Text>
-            <Text style={styles.streakText}>Streak: {item.current_streak}</Text>
-          </View>
+          {item.increment !== "arbitrary" && item.current_streak >= 3 && (
+            <View style={styles.streakBadge}>
+              <Text style={styles.streakEmoji}>{getStreakEmoji(item.current_streak)}</Text>
+              <Text style={styles.streakText}>Streak: {item.current_streak}</Text>
+            </View>
+          )}
 
-        <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Frequency</Text>
-            <Text style={styles.statValue}>{item.frequency}x</Text>
+          <View style={styles.statItem}>
+            <Text style={styles.statLabel}>Target</Text>
+            <Text style={styles.statValue}>{getIncrementDisplayText(item.increment, item.frequency)}</Text>
           </View>
         </View>
 
